@@ -1,0 +1,47 @@
+from pydantic_settings import BaseSettings
+from typing import Optional
+import os
+
+
+class Settings(BaseSettings):
+    # Application
+    app_name: str = "AI Resume Analyzer & Job Match"
+    app_version: str = "1.0.0"
+    debug: bool = False
+    
+    # Database
+    dynamodb_region: str = "us-east-1"
+    dynamodb_endpoint_url: Optional[str] = None
+    
+    # JWT
+    secret_key: str = "your-secret-key-change-in-production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+    
+    # AWS
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_region: str = "us-east-1"
+    
+    # Email
+    ses_region: str = "us-east-1"
+    from_email: str = "noreply@example.com"
+    
+    # Security
+    password_min_length: int = 8
+    password_require_uppercase: bool = True
+    password_require_lowercase: bool = True
+    password_require_numbers: bool = True
+    password_require_special_chars: bool = True
+    
+    # Rate Limiting
+    rate_limit_requests: int = 100
+    rate_limit_window: int = 60  # seconds
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+
+
+settings = Settings()
