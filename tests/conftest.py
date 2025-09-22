@@ -77,42 +77,83 @@ def mock_auth_headers():
 
 
 @pytest.fixture(autouse=True)
-def mock_database():
-    """Mock database operations"""
-    with patch('app.core.database.db_client') as mock_db:
-        # Configure mock database responses
-        mock_db.put_item.return_value = True
-        mock_db.get_item.return_value = None
-        mock_db.update_item.return_value = True
-        mock_db.delete_item.return_value = True
-        mock_db.query.return_value = []
-        mock_db.scan.return_value = []
-        
-        yield mock_db
+def mock_user_repository():
+    """Provide an in-memory UserRepository replacement for tests (no DynamoDB)."""
+    from app.models.user import User, UserSession
+
+    class InMemoryUserRepository:
+        def __init__(self):
+            self.users_by_id = {}
+            self.users_by_email = {}
+            self.sessions = {}
+
+        def create_user(self, user: User) -> bool:
+            if user.email in self.users_by_email:
+                return False
+            self.users_by_id[user.user_id] = user
+            self.users_by_email[user.email] = user
+            return True
+
+        def get_user_by_id(self, user_id: str):
+            return self.users_by_id.get(user_id)
+
+        def get_user_by_email(self, email: str):
+            return self.users_by_email.get(email)
+
+        def update_user(self, user_id: str, update_data: dict) -> bool:
+            user = self.users_by_id.get(user_id)
+            if not user:
+                return False
+            for k, v in update_data.items():
+                setattr(user, k, v)
+            self.users_by_id[user_id] = user
+            self.users_by_email[user.email] = user
+            return True
+
+        def delete_user(self, user_id: str) -> bool:
+            user = self.users_by_id.pop(user_id, None)
+            if user:
+                self.users_by_email.pop(user.email, None)
+                return True
+            return False
+
+        def email_exists(self, email: str) -> bool:
+            return email in self.users_by_email
+
+        def create_session(self, session: UserSession) -> bool:
+            self.sessions[session.session_id] = session
+            return True
+
+        def get_session(self, session_id: str):
+            return self.sessions.get(session_id)
+
+        def get_user_sessions(self, user_id: str):
+            return [s for s in self.sessions.values() if s.user_id == user_id and s.is_active]
+
+        def deactivate_session(self, session_id: str) -> bool:
+            s = self.sessions.get(session_id)
+            if not s:
+                return False
+            s.is_active = False
+            self.sessions[session_id] = s
+            return True
+
+        def deactivate_user_sessions(self, user_id: str) -> bool:
+            any_changed = False
+            for s in self.sessions.values():
+                if s.user_id == user_id:
+                    s.is_active = False
+                    any_changed = True
+            return any_changed
+
+    repo = InMemoryUserRepository()
+
+    # Patch the repository class so AuthService() uses in-memory repo
+    with patch('app.repositories.user.UserRepository', return_value=repo):
+        yield repo
 
 
-@pytest.fixture(autouse=True)
-def mock_auth_service():
-    """Mock authentication service"""
-    with patch('app.services.auth_service.AuthService') as mock_service:
-        # Configure mock service methods
-        mock_service.return_value.register_user.return_value = (True, "User registered successfully")
-        mock_service.return_value.authenticate_user.return_value = (None, "Invalid credentials")
-        mock_service.return_value.create_user_session.return_value = mock_token_response()
-        mock_service.return_value.refresh_access_token.return_value = mock_token_response()
-        mock_service.return_value.logout_user.return_value = True
-        mock_service.return_value.get_current_user.return_value = None
-        mock_service.return_value.verify_email.return_value = (True, "Email verified successfully")
-        
-        yield mock_service
-
-
-@pytest.fixture(autouse=True)
-def mock_security():
-    """Mock security functions"""
-    with patch('app.core.security.verify_token') as mock_verify:
-        mock_verify.return_value = {"user_id": "test-user-id", "email": "test@example.com"}
-        yield mock_verify
+# Remove autouse security mocking to not affect JWT unit tests.
 
 
 @pytest.fixture

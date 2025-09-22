@@ -82,11 +82,7 @@ Sau khi chạy ứng dụng, truy cập:
 
 ## Task Documentation
 
-- **BE-001: User Authentication APIs** - [README-BE-001.md](README-BE-001.md)
-- **BE-002: JWT Implementation** - (Coming soon)
-- **BE-003: Password Hashing** - (Coming soon)
-- **BE-004: Email Verification** - (Coming soon)
-- **BE-005: User Schema & Models** - (Coming soon)
+- **BE-001/002/003/005** - [README-BE-001-2-3-5.md](README-BE-001-2-3-5.md)
 
 ## Testing
 

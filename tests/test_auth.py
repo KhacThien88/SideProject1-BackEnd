@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 
 from app.main import app
+from unittest.mock import patch
 from app.models.user import User, UserRole, UserStatus
 from app.schemas.user import UserRegisterRequest, UserLoginRequest
 
@@ -141,7 +142,7 @@ class TestAuthEndpoints:
         assert "Invalid email or password" in data["detail"]
 
     @patch('app.services.auth_service.AuthService.logout_user')
-    def test_logout_success(self, mock_logout):
+    def test_logout_success(self, mock_logout, mock_user_repository):
         """Test successful logout"""
         # Mock successful logout
         mock_logout.return_value = True
@@ -157,16 +158,21 @@ class TestAuthEndpoints:
         )
         
         # Mock token verification
+        # Seed in-memory repo
+        mock_user_repository.users_by_id[mock_user.user_id] = mock_user
+        mock_user_repository.users_by_email[mock_user.email] = mock_user
+
+        # Ensure router uses in-memory repo
+        import app.api.v1.auth as auth_module
+        auth_module.auth_service.user_repo = mock_user_repository
+
         with patch('app.api.v1.auth.verify_token') as mock_verify:
             mock_verify.return_value = {"user_id": "test-user-id"}
-            with patch('app.services.auth_service.AuthService.user_repo.get_user_by_id') as mock_get_user:
-                mock_get_user.return_value = mock_user
-                
-                headers = {"Authorization": "Bearer test-token"}
-                response = client.post("/api/v1/auth/logout", headers=headers)
-                assert response.status_code == 200
-                data = response.json()
-                assert "Logged out successfully" in data["message"]
+            headers = {"Authorization": "Bearer test-token"}
+            response = client.post("/api/v1/auth/logout", headers=headers)
+            assert response.status_code == 200
+            data = response.json()
+            assert "Logged out successfully" in data["message"]
 
     @patch('app.services.auth_service.AuthService.refresh_access_token')
     def test_refresh_token_success(self, mock_refresh):
@@ -183,7 +189,9 @@ class TestAuthEndpoints:
             "refresh_token": "test-refresh-token"
         }
         
-        response = client.post("/api/v1/auth/refresh", json=refresh_data)
+        with patch('app.api.v1.auth.verify_token') as mock_verify:
+            mock_verify.return_value = {"user_id": "test-user-id"}
+            response = client.post("/api/v1/auth/refresh", json=refresh_data)
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
@@ -203,13 +211,14 @@ class TestAuthEndpoints:
             "refresh_token": "invalid-refresh-token"
         }
         
-        response = client.post("/api/v1/auth/refresh", json=refresh_data)
+        with patch('app.api.v1.auth.verify_token') as mock_verify:
+            mock_verify.return_value = {"user_id": "test-user-id"}
+            response = client.post("/api/v1/auth/refresh", json=refresh_data)
         assert response.status_code == 401
         data = response.json()
         assert "Invalid refresh token" in data["detail"]
 
-    @patch('app.services.auth_service.AuthService.user_repo.get_user_by_id')
-    def test_get_current_user_success(self, mock_get_user):
+    def test_get_current_user_success(self, mock_user_repository):
         """Test getting current user information"""
         # Mock user object
         mock_user = User(
@@ -223,8 +232,14 @@ class TestAuthEndpoints:
             created_at=datetime.utcnow(),
             last_login=datetime.utcnow()
         )
-        mock_get_user.return_value = mock_user
+        # Seed in-memory repo
+        mock_user_repository.users_by_id[mock_user.user_id] = mock_user
+        mock_user_repository.users_by_email[mock_user.email] = mock_user
         
+        # Ensure router uses in-memory repo
+        import app.api.v1.auth as auth_module
+        auth_module.auth_service.user_repo = mock_user_repository
+
         # Mock token verification
         with patch('app.api.v1.auth.verify_token') as mock_verify:
             mock_verify.return_value = {"user_id": "test-user-id"}
