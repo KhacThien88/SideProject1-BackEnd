@@ -7,7 +7,6 @@ import json
 from typing import Dict, Any
 from datetime import datetime
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -23,32 +22,24 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         self.logger = logger
 
     async def dispatch(self, request: Request, call_next):
-        # Start time
         start_time = time.time()
         
-        # Log request
         await self._log_request(request)
         
-        # Process request
         try:
             response = await call_next(request)
             
-            # Calculate processing time
             process_time = time.time() - start_time
             
-            # Log response
             await self._log_response(request, response, process_time)
             
             return response
             
         except Exception as e:
-            # Calculate processing time
             process_time = time.time() - start_time
             
-            # Log error
             await self._log_error(request, e, process_time)
             
-            # Return error response
             return JSONResponse(
                 status_code=500,
                 content={
@@ -60,23 +51,19 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     async def _log_request(self, request: Request):
         """Log incoming request"""
         try:
-            # Get client info
             client_ip = request.client.host if request.client else "unknown"
             user_agent = request.headers.get("user-agent", "unknown")
             
-            # Get request body for POST/PUT requests (be careful with sensitive data)
             body = None
             if request.method in ["POST", "PUT", "PATCH"]:
                 try:
-                    # Only log body for non-sensitive endpoints
                     if not any(sensitive in str(request.url) for sensitive in ["/auth/login", "/auth/register"]):
                         body_bytes = await request.body()
                         if body_bytes:
-                            body = body_bytes.decode("utf-8")[:1000]  # Limit body size
+                            body = body_bytes.decode("utf-8")[:1000]
                 except Exception:
                     body = "[Could not read body]"
             
-            # Create log entry
             log_entry = {
                 "type": "request",
                 "timestamp": datetime.utcnow().isoformat(),
@@ -97,11 +84,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     async def _log_response(self, request: Request, response: Response, process_time: float):
         """Log outgoing response"""
         try:
-            # Get response info
             status_code = response.status_code
             content_type = response.headers.get("content-type", "unknown")
             
-            # Create log entry
             log_entry = {
                 "type": "response",
                 "timestamp": datetime.utcnow().isoformat(),
@@ -113,7 +98,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "headers": dict(response.headers)
             }
             
-            # Log based on status code
             if status_code >= 500:
                 self.logger.error(f"Response: {request.method} {request.url.path} -> {status_code} ({process_time:.4f}s)")
             elif status_code >= 400:

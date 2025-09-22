@@ -2,6 +2,12 @@ from datetime import datetime
 from typing import Optional, List
 from enum import Enum
 from pydantic import BaseModel, EmailStr, Field
+from pynamodb.models import Model
+from pynamodb.attributes import (
+    UnicodeAttribute, BooleanAttribute, UTCDateTimeAttribute
+)
+from pynamodb.indexes import GlobalSecondaryIndex, AllProjection
+from app.core.config import settings
 import uuid
 
 
@@ -46,3 +52,57 @@ class UserSession(BaseModel):
     
     class Config:
         use_enum_values = True
+
+
+class UserTable(Model):
+    """DynamoDB User table model"""
+    class Meta:
+        table_name = "users"
+        region = settings.dynamodb_region
+        host = settings.dynamodb_endpoint_url
+
+    class EmailIndex(GlobalSecondaryIndex):
+        class Meta:
+            index_name = "email-index"
+            projection = AllProjection()
+            region = settings.dynamodb_region
+            host = settings.dynamodb_endpoint_url
+        email = UnicodeAttribute(hash_key=True)
+
+    user_id = UnicodeAttribute(hash_key=True)
+    email = UnicodeAttribute()
+    password_hash = UnicodeAttribute()
+    full_name = UnicodeAttribute()
+    phone = UnicodeAttribute(null=True)
+    role = UnicodeAttribute()
+    status = UnicodeAttribute()
+    email_verified = BooleanAttribute(default=False)
+    created_at = UTCDateTimeAttribute()
+    updated_at = UTCDateTimeAttribute()
+    last_login = UTCDateTimeAttribute(null=True)
+    email_index = EmailIndex()
+
+
+class UserSessionTable(Model):
+    """DynamoDB User sessions table model"""
+    class Meta:
+        table_name = "user_sessions"
+        region = settings.dynamodb_region
+        host = settings.dynamodb_endpoint_url
+
+    class UserIdIndex(GlobalSecondaryIndex):
+        class Meta:
+            index_name = "user-id-index"
+            projection = AllProjection()
+            region = settings.dynamodb_region
+            host = settings.dynamodb_endpoint_url
+        user_id = UnicodeAttribute(hash_key=True)
+
+    session_id = UnicodeAttribute(hash_key=True)
+    user_id = UnicodeAttribute()
+    access_token = UnicodeAttribute()
+    refresh_token = UnicodeAttribute()
+    expires_at = UTCDateTimeAttribute()
+    created_at = UTCDateTimeAttribute()
+    is_active = BooleanAttribute(default=True)
+    user_id_index = UserIdIndex()

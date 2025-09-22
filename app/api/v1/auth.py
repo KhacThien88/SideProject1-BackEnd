@@ -12,17 +12,13 @@ from app.services.auth_service import AuthService
 from app.core.security import verify_token
 from app.models.user import User
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create router
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# Security scheme
 security = HTTPBearer()
 
-# Initialize services
 auth_service = AuthService()
 
 
@@ -61,21 +57,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def register(request: Request, user_data: UserRegisterRequest):
-    """
-    Register a new user account
-    
-    - **email**: Valid email address
-    - **password**: Password (min 8 characters)
-    - **confirm_password**: Password confirmation
-    - **full_name**: User's full name
-    - **phone**: Optional phone number
-    - **role**: User role (candidate/recruiter)
-    """
+    """Register a new user account"""
     try:
-        # Log registration attempt
         logger.info(f"Registration attempt for email: {user_data.email}")
         
-        # Register user
         success, message = await auth_service.register_user(user_data)
         
         if not success:
@@ -111,10 +96,8 @@ async def login(request: Request, login_data: UserLoginRequest):
     - **password**: User's password
     """
     try:
-        # Log login attempt
         logger.info(f"Login attempt for email: {login_data.email}")
         
-        # Authenticate user
         user, message = await auth_service.authenticate_user(login_data)
         
         if not user:
@@ -124,7 +107,6 @@ async def login(request: Request, login_data: UserLoginRequest):
                 detail=message
             )
         
-        # Create session and tokens
         token_response = await auth_service.create_user_session(user)
         
         logger.info(f"User logged in successfully: {user.email}")
@@ -142,14 +124,10 @@ async def login(request: Request, login_data: UserLoginRequest):
 
 @router.post("/logout", response_model=dict)
 async def logout(request: Request, current_user: User = Depends(get_current_user)):
-    """
-    Logout user and invalidate session
-    """
+    """Logout user and invalidate session"""
     try:
-        # Log logout
         logger.info(f"Logout request for user: {current_user.user_id}")
         
-        # Logout user (invalidate all sessions)
         success = await auth_service.logout_user(current_user.user_id)
         
         if not success:
@@ -174,16 +152,10 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: Request, refresh_data: RefreshTokenRequest):
-    """
-    Refresh access token using refresh token
-    
-    - **refresh_token**: Valid refresh token
-    """
+    """Refresh access token using refresh token"""
     try:
-        # Log refresh attempt
         logger.info("Token refresh attempt")
         
-        # Refresh token
         token_response = await auth_service.refresh_access_token(refresh_data.refresh_token)
         
         logger.info("Token refreshed successfully")
@@ -201,14 +173,10 @@ async def refresh_token(request: Request, refresh_data: RefreshTokenRequest):
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(request: Request, current_user: User = Depends(get_current_user)):
-    """
-    Get current user information
-    """
+    """Get current user information"""
     try:
-        # Log user info request
         logger.info(f"User info request for: {current_user.user_id}")
         
-        # Return user information
         return UserResponse(
             user_id=current_user.user_id,
             email=current_user.email,
@@ -235,17 +203,10 @@ async def update_current_user(
     user_update: UserUpdateRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Update current user information
-    
-    - **full_name**: Updated full name
-    - **phone**: Updated phone number
-    """
+    """Update current user information"""
     try:
-        # Log update request
         logger.info(f"User update request for: {current_user.user_id}")
         
-        # Prepare update data
         update_data = {}
         if user_update.full_name is not None:
             update_data["full_name"] = user_update.full_name
@@ -258,7 +219,6 @@ async def update_current_user(
                 detail="No fields to update"
             )
         
-        # Update user
         success = auth_service.user_repo.update_user(current_user.user_id, update_data)
         
         if not success:
@@ -268,7 +228,6 @@ async def update_current_user(
                 detail="Failed to update user"
             )
         
-        # Get updated user
         updated_user = auth_service.user_repo.get_user_by_id(current_user.user_id)
         
         logger.info(f"User updated successfully: {current_user.user_id}")
@@ -296,16 +255,10 @@ async def update_current_user(
 
 @router.post("/verify-email", response_model=dict)
 async def verify_email(request: Request, token: str):
-    """
-    Verify user email with verification token
-    
-    - **token**: Email verification token
-    """
+    """Verify user email with verification token"""
     try:
-        # Log verification attempt
         logger.info("Email verification attempt")
         
-        # Verify email
         success, message = await auth_service.verify_email(token)
         
         if not success:

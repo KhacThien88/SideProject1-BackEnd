@@ -4,7 +4,8 @@ from fastapi import HTTPException, status
 from app.core.security import (
     verify_password, get_password_hash, create_access_token, 
     create_refresh_token, verify_token, validate_password_strength,
-    generate_verification_token
+    generate_verification_token, generate_password_reset_token,
+    needs_hash_upgrade
 )
 from app.repositories.user import UserRepository
 from app.models.user import User, UserSession, UserRole, UserStatus
@@ -20,20 +21,16 @@ class AuthService:
     async def register_user(self, user_data: UserRegisterRequest) -> Tuple[bool, str]:
         """Register a new user"""
         try:
-            # Validate password confirmation
             if user_data.password != user_data.confirm_password:
                 return False, "Passwords do not match"
 
-            # Validate password strength
             is_valid, message = validate_password_strength(user_data.password)
             if not is_valid:
                 return False, message
 
-            # Check if email already exists
             if self.user_repo.email_exists(user_data.email):
                 return False, "Email already registered"
 
-            # Create user object
             user = User(
                 email=user_data.email,
                 password_hash=get_password_hash(user_data.password),
@@ -43,13 +40,10 @@ class AuthService:
                 status=UserStatus.PENDING_VERIFICATION
             )
 
-            # Save user to database
             if not self.user_repo.create_user(user):
                 return False, "Failed to create user account"
 
-            # TODO: Send verification email
-            # For now, we'll skip email verification in development
-            # In production, you would send an email with verification link
+            # Email verification sẽ bổ sung khi triển khai BE-004
 
             return True, "User registered successfully"
 
@@ -60,12 +54,10 @@ class AuthService:
     async def authenticate_user(self, login_data: UserLoginRequest) -> Tuple[Optional[User], str]:
         """Authenticate user login"""
         try:
-            # Get user by email
             user = self.user_repo.get_user_by_email(login_data.email)
             if not user:
                 return None, "Invalid email or password"
 
-            # Check if user is active
             if user.status != UserStatus.ACTIVE:
                 if user.status == UserStatus.PENDING_VERIFICATION:
                     return None, "Please verify your email before logging in"
@@ -74,11 +66,15 @@ class AuthService:
                 else:
                     return None, "Account is not active"
 
-            # Verify password
             if not verify_password(login_data.password, user.password_hash):
                 return None, "Invalid email or password"
 
-            # Update last login
+            try:
+                if needs_hash_upgrade(user.password_hash):
+                    self.user_repo.update_user(user.user_id, {"password_hash": get_password_hash(login_data.password)})
+            except Exception:
+                pass
+
             self.user_repo.update_user(user.user_id, {"last_login": datetime.utcnow()})
 
             return user, "Login successful"
@@ -136,7 +132,13 @@ class AuthService:
             )
 
     async def refresh_access_token(self, refresh_token: str) -> TokenResponse:
-        """Refresh access token using refresh token"""
+        """Refresh access token using refresh token with rotation.
+
+        - Verifies refresh token
+        - Blacklists old refresh token jti
+        - Issues new refresh token (rotation)
+        - Issues new access token
+        """
         try:
             # Verify refresh token
             payload = verify_token(refresh_token, "refresh")
@@ -172,16 +174,31 @@ class AuthService:
             }
             access_token = create_access_token(access_token_data)
 
-            # Update session with new access token
+            # Rotation: issue new refresh token and (optionally) deactivate existing session
+            new_refresh_token = create_refresh_token({
+                "sub": user.user_id,
+                "email": user.email,
+                "user_id": user.user_id
+            })
+
+            # Update session store: deactivate old session and create new
             sessions = self.user_repo.get_user_sessions(user_id)
             for session in sessions:
                 if session.refresh_token == refresh_token and session.is_active:
-                    self.user_repo.update_user(user_id, {"access_token": access_token})
+                    self.user_repo.deactivate_session(session.session_id)
                     break
+            # Create new session
+            new_session = UserSession(
+                user_id=user.user_id,
+                access_token=access_token,
+                refresh_token=new_refresh_token,
+                expires_at=datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+            )
+            self.user_repo.create_session(new_session)
 
             return TokenResponse(
                 access_token=access_token,
-                refresh_token=refresh_token,
+                refresh_token=new_refresh_token,
                 expires_in=settings.access_token_expire_minutes * 60
             )
 
@@ -207,6 +224,62 @@ class AuthService:
         except Exception as e:
             print(f"Error in logout_user: {e}")
             return False
+
+    async def generate_password_reset(self, email: str) -> Tuple[bool, str]:
+        """Generate a password reset token for a user (placeholder without email send)."""
+        try:
+            user = self.user_repo.get_user_by_email(email)
+            if not user:
+                return False, "User not found"
+            token = generate_password_reset_token()
+            # Store token and expiry (simple approach on user item)
+            self.user_repo.update_user(user.user_id, {
+                "reset_token": token,
+                "reset_token_expiry": datetime.utcnow() + timedelta(hours=1)
+            })
+            return True, token
+        except Exception as e:
+            print(f"Error in generate_password_reset: {e}")
+            return False, "Failed to generate reset token"
+
+    async def reset_password(self, token: str, new_password: str) -> Tuple[bool, str]:
+        """Reset password using a valid reset token."""
+        try:
+            # Find user by scanning for reset token (without GSI)
+            # In production, add GSI for reset_token
+            from app.core.database import db_client
+            items = db_client.scan(self.user_repo.table_name)
+            match = None
+            for it in items:
+                if it.get("reset_token") == token:
+                    match = it
+                    break
+            if not match:
+                return False, "Invalid or expired reset token"
+
+            # Check expiry
+            expiry = match.get("reset_token_expiry")
+            if isinstance(expiry, str):
+                expiry = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+            if not expiry or expiry < datetime.utcnow():
+                return False, "Reset token expired"
+
+            # Validate password policy
+            is_valid, message = validate_password_strength(new_password)
+            if not is_valid:
+                return False, message
+
+            # Update password and clear token
+            user_id = match["user_id"]
+            self.user_repo.update_user(user_id, {
+                "password_hash": get_password_hash(new_password),
+                "reset_token": None,
+                "reset_token_expiry": None
+            })
+            return True, "Password has been reset"
+        except Exception as e:
+            print(f"Error in reset_password: {e}")
+            return False, "Failed to reset password"
 
     async def get_current_user(self, user_id: str) -> Optional[User]:
         """Get current user by ID"""

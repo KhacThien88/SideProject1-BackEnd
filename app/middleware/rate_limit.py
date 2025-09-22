@@ -10,7 +10,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# In-memory rate limiting store (use Redis in production)
 rate_limit_store: Dict[str, Dict[str, float]] = defaultdict(lambda: {"count": 0, "reset_time": 0})
 
 
@@ -21,13 +20,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.window_seconds = window_seconds or settings.rate_limit_window
 
     async def dispatch(self, request: Request, call_next):
-        # Get client IP
         client_ip = request.client.host
         
-        # Get current time
         current_time = time.time()
         
-        # Check rate limit
         if self._is_rate_limited(client_ip, current_time):
             logger.warning(f"Rate limit exceeded for IP: {client_ip}")
             return JSONResponse(
@@ -39,10 +35,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": str(self.window_seconds)}
             )
         
-        # Process request
         response = await call_next(request)
         
-        # Update rate limit counter
         self._update_rate_limit(client_ip, current_time)
         
         return response
@@ -51,19 +45,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """Check if client is rate limited"""
         client_data = rate_limit_store[client_ip]
         
-        # Reset counter if window has passed
         if current_time >= client_data["reset_time"]:
             client_data["count"] = 0
             client_data["reset_time"] = current_time + self.window_seconds
         
-        # Check if limit exceeded
         return client_data["count"] >= self.requests_per_minute
 
     def _update_rate_limit(self, client_ip: str, current_time: float):
         """Update rate limit counter"""
         client_data = rate_limit_store[client_ip]
         
-        # Reset counter if window has passed
         if current_time >= client_data["reset_time"]:
             client_data["count"] = 1
             client_data["reset_time"] = current_time + self.window_seconds

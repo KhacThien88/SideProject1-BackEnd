@@ -8,8 +8,6 @@ from datetime import datetime
 
 class DynamoDBClient:
     def __init__(self):
-        # For local development, use endpoint_url without AWS credentials
-        # For production, AWS credentials should be configured via IAM roles or environment
         self.dynamodb = boto3.resource(
             'dynamodb',
             region_name=settings.dynamodb_region,

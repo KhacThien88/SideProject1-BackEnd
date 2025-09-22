@@ -11,7 +11,6 @@ from app.api.v1 import auth
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -22,18 +21,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
-    # Startup
     logger.info("Starting up AI Resume Analyzer & Job Match API...")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"Database region: {settings.dynamodb_region}")
     
     yield
     
-    # Shutdown
     logger.info("Shutting down AI Resume Analyzer & Job Match API...")
 
 
-# Create FastAPI app
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,

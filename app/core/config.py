@@ -18,9 +18,12 @@ class Settings(BaseSettings):
     
     # JWT
     secret_key: str = "your-secret-key-change-in-production"
-    algorithm: str = "HS256"
+    algorithm: str = "HS256"  # HS256 or RS256
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    # RS256 key paths (optional). If provided and algorithm == RS256, will be used
+    jwt_private_key_path: Optional[str] = None
+    jwt_public_key_path: Optional[str] = None
     
     # CORS
     cors_origins: str = "http://localhost:3000"
@@ -49,6 +52,9 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_requests: int = 100
     rate_limit_window: int = 60  # seconds
+
+    # Redis (for token blacklisting)
+    redis_url: Optional[str] = "redis://localhost:6379/0"
     
     class Config:
         env_file = ".env"
