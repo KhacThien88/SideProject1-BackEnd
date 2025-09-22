@@ -1,0 +1,87 @@
+# FastAPI và dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# AWS SDK
+boto3==1.34.0
+botocore==1.34.0
+
+# Database
+dynamodb-json==1.3.1
+pynamodb==6.0.0
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# HTTP Client
+httpx==0.25.2
+requests==2.31.0
+
+# Email
+emails==0.6.0
+jinja2==3.1.2
+
+# AI/ML Libraries
+spacy==3.7.2
+transformers==4.36.0
+torch==2.1.1
+scikit-learn==1.3.2
+pandas==2.1.4
+numpy==1.24.4
+
+# Text Processing
+nltk==3.8.1
+langdetect==1.0.9
+
+# Search Engine
+opensearch-py==2.4.0
+elasticsearch==8.11.0
+
+# Caching
+redis==5.0.1
+aioredis==2.0.1
+
+# Monitoring & Logging
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Utilities
+python-dotenv==1.0.0
+click==8.1.7
+rich==13.7.0
+
+# File Processing
+python-magic==0.4.27
+Pillow==10.1.0
+
+# Date/Time
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Validation
+email-validator==2.1.0
+phonenumbers==8.13.25
+
+# Async Support
+asyncio==3.4.3
+aiofiles==23.2.1
+
+# Background Tasks
+celery==5.3.4
+kombu==5.3.4
+
+# Rate Limiting
+slowapi==0.1.9
+
+# CORS
+fastapi-cors==0.0.6
+
+# Health Checks
+fastapi-health==0.1.0
+
+# API Documentation
+fastapi-swagger-ui==0.1.0
