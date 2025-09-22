@@ -8,19 +8,17 @@ from datetime import datetime
 
 class DynamoDBClient:
     def __init__(self):
+        # For local development, use endpoint_url without AWS credentials
+        # For production, AWS credentials should be configured via IAM roles or environment
         self.dynamodb = boto3.resource(
             'dynamodb',
             region_name=settings.dynamodb_region,
-            endpoint_url=settings.dynamodb_endpoint_url,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
+            endpoint_url=settings.dynamodb_endpoint_url
         )
         self.client = boto3.client(
             'dynamodb',
             region_name=settings.dynamodb_region,
-            endpoint_url=settings.dynamodb_endpoint_url,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
+            endpoint_url=settings.dynamodb_endpoint_url
         )
 
     def get_table(self, table_name: str):

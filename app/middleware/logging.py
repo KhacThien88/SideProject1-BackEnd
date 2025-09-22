@@ -1,5 +1,6 @@
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import time
 import logging
 import json
@@ -14,13 +15,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class LoggingMiddleware:
+class LoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for request/response logging"""
     
-    def __init__(self):
+    def __init__(self, app):
+        super().__init__(app)
         self.logger = logger
 
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         # Start time
         start_time = time.time()
         

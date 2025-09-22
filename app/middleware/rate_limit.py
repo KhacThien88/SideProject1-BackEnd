@@ -1,5 +1,6 @@
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Dict, Tuple
 import time
 import asyncio
@@ -13,12 +14,13 @@ logger = logging.getLogger(__name__)
 rate_limit_store: Dict[str, Dict[str, float]] = defaultdict(lambda: {"count": 0, "reset_time": 0})
 
 
-class RateLimitMiddleware:
-    def __init__(self, requests_per_minute: int = None, window_seconds: int = None):
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, requests_per_minute: int = None, window_seconds: int = None):
+        super().__init__(app)
         self.requests_per_minute = requests_per_minute or settings.rate_limit_requests
         self.window_seconds = window_seconds or settings.rate_limit_window
 
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         # Get client IP
         client_ip = request.client.host
         

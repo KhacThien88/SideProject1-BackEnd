@@ -8,10 +8,13 @@ class Settings(BaseSettings):
     app_name: str = "AI Resume Analyzer & Job Match"
     app_version: str = "1.0.0"
     debug: bool = False
+    environment: str = "development"
+    log_level: str = "INFO"
     
     # Database
     dynamodb_region: str = "us-east-1"
     dynamodb_endpoint_url: Optional[str] = None
+    database_url: Optional[str] = None
     
     # JWT
     secret_key: str = "your-secret-key-change-in-production"
@@ -19,14 +22,22 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     
-    # AWS
-    aws_access_key_id: Optional[str] = None
-    aws_secret_access_key: Optional[str] = None
-    aws_region: str = "us-east-1"
+    # CORS
+    cors_origins: str = "http://localhost:3000"
+    cors_allow_credentials: bool = True
     
-    # Email
-    ses_region: str = "us-east-1"
+    # Email/SMTP
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    smtp_use_tls: bool = True
     from_email: str = "noreply@example.com"
+    
+    # File Upload
+    max_file_size: int = 10485760  # 10MB
+    upload_dir: str = "./uploads"
+    allowed_file_types: str = "pdf,doc,docx,txt"
     
     # Security
     password_min_length: int = 8
