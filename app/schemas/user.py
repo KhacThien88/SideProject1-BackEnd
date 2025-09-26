@@ -1,16 +1,35 @@
-from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
-from app.models.user import UserRole, UserStatus
+from enum import Enum
+from datetime import datetime
+
+
+class UserRole(str, Enum):
+    CANDIDATE = "candidate"
+    RECRUITER = "recruiter"
+    ADMIN = "admin"
+
+
+class UserStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    PENDING_VERIFICATION = "pending_verification"
+    SUSPENDED = "suspended"
 
 
 class UserRegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=100)
+    password: str = Field(..., min_length=8)
     confirm_password: str
     full_name: str = Field(..., min_length=2, max_length=100)
-    phone: Optional[str] = Field(None, max_length=20)
-    role: UserRole
+    phone: Optional[str] = Field(None, pattern=r'^[0-9+\-\s()]+$')
+    role: UserRole = UserRole.CANDIDATE
+
+    @validator('confirm_password')
+    def passwords_match(cls, v, values):
+        if 'password' in values and v != values['password']:
+            raise ValueError('Passwords do not match')
+        return v
 
 
 class UserLoginRequest(BaseModel):
@@ -20,17 +39,23 @@ class UserLoginRequest(BaseModel):
 
 class UserResponse(BaseModel):
     user_id: str
-    email: str
+    email: EmailStr
     full_name: str
     phone: Optional[str]
     role: UserRole
     status: UserStatus
     email_verified: bool
     created_at: datetime
+    updated_at: datetime
     last_login: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+class UserUpdateRequest(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    phone: Optional[str] = Field(None, pattern=r'^[0-9+\-\s()]+$')
 
 
 class TokenResponse(BaseModel):
@@ -38,22 +63,17 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    user: UserResponse
 
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
-class PasswordChangeRequest(BaseModel):
-    current_password: str
-    new_password: str = Field(..., min_length=8, max_length=100)
-    confirm_new_password: str
+class OTPVerificationRequest(BaseModel):
+    email: EmailStr
+    otp_code: str = Field(..., min_length=6, max_length=6, pattern=r'^\d{6}$')
 
 
-class EmailVerificationRequest(BaseModel):
-    token: str
-
-
-class UserUpdateRequest(BaseModel):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    phone: Optional[str] = Field(None, max_length=20)
+class ResendOTPRequest(BaseModel):
+    email: EmailStr

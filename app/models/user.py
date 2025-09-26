@@ -55,18 +55,28 @@ class UserSession(BaseModel):
 
 
 class UserTable(Model):
-    """DynamoDB User table model"""
+    
     class Meta:
         table_name = "users"
         region = settings.dynamodb_region
-        host = settings.dynamodb_endpoint_url
+        if settings.dynamodb_endpoint_url:
+            host = settings.dynamodb_endpoint_url
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            aws_access_key_id = settings.aws_access_key_id
+            aws_secret_access_key = settings.aws_secret_access_key
 
     class EmailIndex(GlobalSecondaryIndex):
         class Meta:
             index_name = "email-index"
             projection = AllProjection()
             region = settings.dynamodb_region
-            host = settings.dynamodb_endpoint_url
+            read_capacity_units = 1
+            write_capacity_units = 1
+            if settings.dynamodb_endpoint_url:
+                host = settings.dynamodb_endpoint_url
+            if settings.aws_access_key_id and settings.aws_secret_access_key:
+                aws_access_key_id = settings.aws_access_key_id
+                aws_secret_access_key = settings.aws_secret_access_key
         email = UnicodeAttribute(hash_key=True)
 
     user_id = UnicodeAttribute(hash_key=True)
@@ -84,18 +94,28 @@ class UserTable(Model):
 
 
 class UserSessionTable(Model):
-    """DynamoDB User sessions table model"""
+    
     class Meta:
         table_name = "user_sessions"
         region = settings.dynamodb_region
-        host = settings.dynamodb_endpoint_url
+        if settings.dynamodb_endpoint_url:
+            host = settings.dynamodb_endpoint_url
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            aws_access_key_id = settings.aws_access_key_id
+            aws_secret_access_key = settings.aws_secret_access_key
 
     class UserIdIndex(GlobalSecondaryIndex):
         class Meta:
             index_name = "user-id-index"
             projection = AllProjection()
             region = settings.dynamodb_region
-            host = settings.dynamodb_endpoint_url
+            read_capacity_units = 1
+            write_capacity_units = 1
+            if settings.dynamodb_endpoint_url:
+                host = settings.dynamodb_endpoint_url
+            if settings.aws_access_key_id and settings.aws_secret_access_key:
+                aws_access_key_id = settings.aws_access_key_id
+                aws_secret_access_key = settings.aws_secret_access_key
         user_id = UnicodeAttribute(hash_key=True)
 
     session_id = UnicodeAttribute(hash_key=True)

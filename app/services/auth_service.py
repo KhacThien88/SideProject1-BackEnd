@@ -8,8 +8,10 @@ from app.core.security import (
     needs_hash_upgrade
 )
 from app.repositories.user import UserRepository
+from app.services.email import email_service
 from app.models.user import User, UserSession, UserRole, UserStatus
-from app.schemas.user import UserRegisterRequest, UserLoginRequest, TokenResponse
+from app.models.otp import OTPTable
+from app.schemas.user import UserRegisterRequest, UserLoginRequest, TokenResponse, UserResponse
 from app.core.config import settings
 import secrets
 
@@ -43,9 +45,22 @@ class AuthService:
             if not self.user_repo.create_user(user):
                 return False, "Failed to create user account"
 
-            # Email verification sẽ bổ sung khi triển khai BE-004
+            # Gửi email verification
+            try:
+                email_result = await email_service.send_otp_verification_email(
+                    email=user.email,
+                    user_id=user.user_id,
+                    user_name=user.full_name
+                )
+                
+                if not email_result["success"]:
+                    # Log lỗi nhưng không fail registration
+                    print(f"Failed to send OTP verification email: {email_result['error']}")
+            except Exception as e:
+                # Log lỗi nhưng không fail registration
+                print(f"Error sending OTP verification email: {str(e)}")
 
-            return True, "User registered successfully"
+            return True, "User registered successfully. Please check your email for verification."
 
         except Exception as e:
             print(f"Error in register_user: {e}")
@@ -121,7 +136,20 @@ class AuthService:
             return TokenResponse(
                 access_token=access_token,
                 refresh_token=refresh_token,
-                expires_in=settings.access_token_expire_minutes * 60
+                token_type="bearer",
+                expires_in=settings.access_token_expire_minutes * 60,
+                user=UserResponse(
+                    user_id=user.user_id,
+                    email=user.email,
+                    full_name=user.full_name,
+                    phone=user.phone,
+                    role=user.role,
+                    status=user.status,
+                    email_verified=user.email_verified,
+                    created_at=user.created_at,
+                    updated_at=user.updated_at,
+                    last_login=user.last_login
+                )
             )
 
         except Exception as e:
@@ -211,6 +239,103 @@ class AuthService:
                 detail="Failed to refresh token"
             )
 
+    async def verify_otp_code(self, email: str, otp_code: str) -> Tuple[bool, str]:
+        """Verify OTP code và kích hoạt tài khoản"""
+        try:
+            # Tìm user theo email
+            user = self.user_repo.get_user_by_email(email)
+            if not user:
+                return False, "User not found"
+            
+            if user.email_verified:
+                return False, "Email already verified"
+            
+            # Tìm OTP record mới nhất cho user này
+            try:
+                otp_records = []
+                for otp in OTPTable.scan(OTPTable.email == email):
+                    if otp.is_used == "false":
+                        otp_records.append(otp)
+                
+                if not otp_records:
+                    return False, "No valid OTP found. Please request a new one."
+                
+                # Sắp xếp theo thời gian tạo, lấy cái mới nhất
+                otp_records.sort(key=lambda x: x.created_at, reverse=True)
+                latest_otp = otp_records[0]
+                
+                # Kiểm tra OTP đã hết hạn chưa
+                current_time = datetime.utcnow()
+                expires_time = latest_otp.expires_at
+                
+                # Convert to same timezone if needed
+                if hasattr(expires_time, 'tzinfo') and expires_time.tzinfo is not None:
+                    expires_time = expires_time.replace(tzinfo=None)
+                
+                if current_time > expires_time:
+                    return False, "OTP has expired. Please request a new one."
+                
+                # Kiểm tra số lần thử
+                if latest_otp.attempts >= 3:
+                    return False, "Too many failed attempts. Please request a new OTP."
+                
+                # Kiểm tra mã OTP
+                if latest_otp.otp_code != otp_code:
+                    # Tăng số lần thử
+                    latest_otp.attempts = latest_otp.attempts + 1
+                    latest_otp.save()
+                    return False, f"Invalid OTP code. {3 - latest_otp.attempts} attempts remaining."
+                
+                # OTP đúng - kích hoạt tài khoản
+                latest_otp.is_used = "true"
+                latest_otp.save()
+                
+                # Cập nhật user status
+                success = self.user_repo.update_user(user.user_id, {
+                    "email_verified": True,
+                    "status": UserStatus.ACTIVE
+                })
+                
+                if not success:
+                    return False, "Failed to activate account"
+                
+                return True, "Email verified successfully. Your account is now active."
+                
+            except Exception as e:
+                print(f"Error querying OTP records: {e}")
+                return False, "Error verifying OTP"
+            
+        except Exception as e:
+            print(f"Error in verify_otp_code: {e}")
+            return False, "Internal server error during OTP verification"
+
+    async def resend_otp_code(self, email: str) -> Tuple[bool, str]:
+        """Gửi lại mã OTP verification"""
+        try:
+            # Tìm user theo email
+            user = self.user_repo.get_user_by_email(email)
+            if not user:
+                return False, "User not found"
+            
+            if user.email_verified:
+                return False, "Email already verified"
+            
+            # Gửi OTP mới
+            email_result = await email_service.send_otp_verification_email(
+                email=user.email,
+                user_id=user.user_id,
+                user_name=user.full_name
+            )
+            
+            if not email_result["success"]:
+                return False, f"Failed to send OTP: {email_result['error']}"
+            
+            return True, "OTP sent successfully. Please check your email."
+            
+        except Exception as e:
+            print(f"Error in resend_otp_code: {e}")
+            return False, "Internal server error during OTP resend"
+
     async def logout_user(self, user_id: str, session_id: Optional[str] = None) -> bool:
         """Logout user and invalidate session(s)"""
         try:
@@ -281,6 +406,24 @@ class AuthService:
             print(f"Error in reset_password: {e}")
             return False, "Failed to reset password"
 
+    async def update_user_password(self, user_id: str, new_password: str) -> bool:
+        """Update user password"""
+        try:
+            # Validate password policy
+            is_valid, message = validate_password_strength(new_password)
+            if not is_valid:
+                return False
+            
+            # Update password
+            success = self.user_repo.update_user(user_id, {
+                "password_hash": get_password_hash(new_password)
+            })
+            
+            return success
+            
+        except Exception as e:
+            print(f"Error in update_user_password: {e}")
+            return False
     async def get_current_user(self, user_id: str) -> Optional[User]:
         """Get current user by ID"""
         try:

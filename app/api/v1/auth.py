@@ -6,9 +6,11 @@ import logging
 
 from app.schemas.user import (
     UserRegisterRequest, UserLoginRequest, UserResponse, 
-    TokenResponse, RefreshTokenRequest, UserUpdateRequest
+    TokenResponse, RefreshTokenRequest, UserUpdateRequest,
+    OTPVerificationRequest, ResendOTPRequest
 )
 from app.services.auth_service import AuthService
+from app.services.email import email_service
 from app.core.security import verify_token
 from app.models.user import User
 
@@ -253,29 +255,164 @@ async def update_current_user(
         )
 
 
-@router.post("/verify-email", response_model=dict)
-async def verify_email(request: Request, token: str):
-    """Verify user email with verification token"""
+@router.post("/verify-otp", response_model=dict)
+async def verify_otp(request: Request, otp_data: OTPVerificationRequest):
+    """
+    Verify OTP code để kích hoạt tài khoản
+    
+    - **email**: Email của user
+    - **otp_code**: Mã OTP 6 số
+    """
     try:
-        logger.info("Email verification attempt")
+        logger.info(f"OTP verification attempt for email: {otp_data.email}")
         
-        success, message = await auth_service.verify_email(token)
+        success, message = await auth_service.verify_otp_code(otp_data.email, otp_data.otp_code)
         
         if not success:
-            logger.warning(f"Email verification failed: {message}")
+            logger.warning(f"OTP verification failed for {otp_data.email}: {message}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=message
             )
         
-        logger.info("Email verified successfully")
-        return {"message": message}
+        logger.info(f"OTP verified successfully for: {otp_data.email}")
+        return {
+            "message": message,
+            "email": otp_data.email,
+            "status": "verified"
+        }
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in verify_email: {e}")
+        logger.error(f"Unexpected error in verify_otp: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during email verification"
+            detail="Internal server error during OTP verification"
+        )
+
+
+@router.post("/resend-otp", response_model=dict)
+async def resend_otp(request: Request, resend_data: ResendOTPRequest):
+    """
+    Gửi lại mã OTP verification
+    
+    - **email**: Email của user cần gửi lại OTP
+    """
+    try:
+        logger.info(f"Resend OTP attempt for email: {resend_data.email}")
+        
+        success, message = await auth_service.resend_otp_code(resend_data.email)
+        
+        if not success:
+            logger.warning(f"Resend OTP failed for {resend_data.email}: {message}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=message
+            )
+        
+        logger.info(f"OTP resent successfully for: {resend_data.email}")
+        return {
+            "message": message,
+            "email": resend_data.email
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in resend_otp: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during OTP resend"
+        )
+
+
+@router.post("/forgot-password", response_model=dict)
+async def forgot_password(request: Request, email: str):
+    """Send password reset email to user"""
+    try:
+        logger.info(f"Forgot password request for: {email}")
+        
+        # Tìm user theo email
+        user = auth_service.user_repo.get_user_by_email(email)
+        if not user:
+            # Không tiết lộ thông tin về user tồn tại hay không
+            logger.info(f"Password reset requested for non-existent email: {email}")
+            return {
+                "message": "If the email exists, a password reset link has been sent"
+            }
+        
+        # Gửi password reset email
+        result = await email_service.send_password_reset_email(email, user.user_id)
+        
+        if not result["success"]:
+            logger.warning(f"Failed to send password reset email: {result['error']}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send password reset email"
+            )
+        
+        logger.info(f"Password reset email sent successfully to: {email}")
+        return {
+            "message": "If the email exists, a password reset link has been sent",
+            "email": email
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in forgot_password: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during password reset"
+        )
+
+
+@router.post("/reset-password", response_model=dict)
+async def reset_password(request: Request, token: str, new_password: str):
+    """Reset user password with reset token"""
+    try:
+        logger.info("Password reset attempt")
+        
+        # Verify reset token
+        result = await email_service.verify_email_token(token)
+        
+        if not result["success"]:
+            logger.warning(f"Password reset failed: {result['error']}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result["error"]
+            )
+        
+        user_id = result["user_id"]
+        
+        # Validate new password
+        if len(new_password) < settings.password_min_length:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Password must be at least {settings.password_min_length} characters long"
+            )
+        
+        # Update user password
+        success = await auth_service.update_user_password(user_id, new_password)
+        
+        if not success:
+            logger.warning(f"Failed to update password for user: {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update password"
+            )
+        
+        logger.info(f"Password reset successfully for user: {user_id}")
+        return {
+            "message": "Password reset successfully"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in reset_password: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during password reset"
         )

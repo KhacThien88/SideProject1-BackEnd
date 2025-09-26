@@ -8,16 +8,22 @@ from datetime import datetime
 
 class DynamoDBClient:
     def __init__(self):
-        self.dynamodb = boto3.resource(
-            'dynamodb',
-            region_name=settings.dynamodb_region,
-            endpoint_url=settings.dynamodb_endpoint_url
-        )
-        self.client = boto3.client(
-            'dynamodb',
-            region_name=settings.dynamodb_region,
-            endpoint_url=settings.dynamodb_endpoint_url
-        )
+        # Prepare boto3 configuration
+        boto3_config = {
+            'region_name': settings.dynamodb_region,
+        }
+        
+        # Add endpoint_url if specified (for local DynamoDB)
+        if settings.dynamodb_endpoint_url:
+            boto3_config['endpoint_url'] = settings.dynamodb_endpoint_url
+        
+        # Add AWS credentials if specified
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            boto3_config['aws_access_key_id'] = settings.aws_access_key_id
+            boto3_config['aws_secret_access_key'] = settings.aws_secret_access_key
+        
+        self.dynamodb = boto3.resource('dynamodb', **boto3_config)
+        self.client = boto3.client('dynamodb', **boto3_config)
 
     def get_table(self, table_name: str):
         """Get DynamoDB table"""
@@ -102,3 +108,13 @@ class DynamoDBClient:
 
 # Global database client instance
 db_client = DynamoDBClient()
+
+
+def get_dynamodb_resource():
+    """Get DynamoDB resource instance"""
+    return db_client.dynamodb
+
+
+def get_dynamodb_client():
+    """Get DynamoDB client instance"""
+    return db_client.client

@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     from_email: str = "noreply@example.com"
     
+    # AWS SES
+    aws_region: str = "us-east-1"
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    ses_from_email: str = "noreply@example.com"
+    frontend_url: str = "http://localhost:3000"
+    
     # File Upload
     max_file_size: int = 10485760  # 10MB
     upload_dir: str = "./uploads"
