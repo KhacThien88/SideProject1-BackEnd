@@ -49,6 +49,27 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     allowed_file_types: str = "pdf,doc,docx,txt"
     
+    # S3 Configuration
+    s3_bucket_name: str = "ai-resume-analyzer-cv-uploads"
+    s3_region: str = "us-east-1"
+    
+    # DynamoDB Table Names
+    users_table_name: str = "ai-resume-analyzer-users"
+    applications_table_name: str = "ai-resume-analyzer-applications"
+    jobs_table_name: str = "ai-resume-analyzer-jobs"
+    feedback_table_name: str = "ai-resume-analyzer-feedback"
+    notifications_table_name: str = "ai-resume-analyzer-notifications"
+    cv_uploads_table_name: str = "ai-resume-analyzer-cv-uploads"
+    rate_limit_table_name: str = "ai-resume-analyzer-rate-limit"
+    email_verification_table_name: str = "ai-resume-analyzer-email-verification"
+    cv_storage_table_name: str = "ai-resume-analyzer-cv-storage"
+    cv_search_table_name: str = "ai-resume-analyzer-cv-search"
+    cv_analytics_table_name: str = "ai-resume-analyzer-cv-analytics"
+    
+    # Textract Configuration
+    textract_sns_topic_arn: Optional[str] = None
+    textract_sqs_queue_url: Optional[str] = None
+    
     # Security
     password_min_length: int = 8
     password_require_uppercase: bool = True
