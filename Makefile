@@ -26,6 +26,12 @@ test: ## Run tests
 test-cov: ## Run tests with coverage
 	pytest --cov=app --cov-report=html --cov-report=term
 
+test-auth: ## Test authentication APIs
+	python scripts/test_auth_api.py
+
+test-auth-verbose: ## Test authentication APIs with verbose output
+	python scripts/test_auth_api.py --verbose
+
 # Code quality
 lint: ## Run linting
 	flake8 app tests
