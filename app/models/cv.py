@@ -50,7 +50,7 @@ class SkillCategory(str, Enum):
 class ContactInfo(BaseModel):
     """Contact information model"""
     email: Optional[str] = Field(None, description="Email address")
-    phone: Optional[str] = Field(None, description="Phone number")
+    phone: Optional[str] = Field(None, description="Phone number") 
     address: Optional[str] = Field(None, description="Physical address")
     city: Optional[str] = Field(None, description="City")
     country: Optional[str] = Field(None, description="Country")
@@ -67,7 +67,6 @@ class ContactInfo(BaseModel):
     @validator('phone')
     def validate_phone(cls, v):
         if v:
-            # Remove all non-digit characters
             digits = re.sub(r'\D', '', v)
             if len(digits) < 7 or len(digits) > 15:
                 raise ValueError('Phone number must be between 7 and 15 digits')
@@ -127,13 +126,12 @@ class Education(BaseModel):
             raise ValueError('Institution name must be at least 2 characters')
         return v.strip()
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validate_dates(cls, values):
         start_date = values.get('start_date')
         end_date = values.get('end_date')
-        is_current = values.get('is_current', False)
         
-        if start_date and end_date and not is_current:
+        if start_date and end_date and not values.get('is_current', False):
             if start_date > end_date:
                 raise ValueError('Start date must be before end date')
         
@@ -167,13 +165,12 @@ class WorkExperience(BaseModel):
             raise ValueError('Position must be at least 2 characters')
         return v.strip()
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validate_dates(cls, values):
         start_date = values.get('start_date')
         end_date = values.get('end_date')
-        is_current = values.get('is_current', False)
         
-        if start_date and end_date and not is_current:
+        if start_date and end_date and not values.get('is_current', False):
             if start_date > end_date:
                 raise ValueError('Start date must be before end date')
         
@@ -296,48 +293,29 @@ class CVAnalysis(BaseModel):
             return sorted(v, key=lambda x: x.end_date or date.min, reverse=True)
         return v
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def calculate_scores(cls, values):
-        """Calculate various scores based on available data"""
+        """Calculate completeness và quality scores based on available data"""
         try:
             # Calculate completeness score
-            completeness = 0
-            total_fields = 0
-            
-            if values.get('personal_info'):
-                completeness += 1
-            total_fields += 1
-            
-            if values.get('work_experience'):
-                completeness += 1
-            total_fields += 1
-            
-            if values.get('education'):
-                completeness += 1
-            total_fields += 1
-            
-            if values.get('skills'):
-                completeness += 1
-            total_fields += 1
-            
-            if total_fields > 0:
-                values['completeness_score'] = (completeness / total_fields) * 100
+            required_fields = ['personal_info', 'work_experience', 'education', 'skills']
+            completeness = sum(1 for field in required_fields if values.get(field))
+            values['completeness_score'] = (completeness / len(required_fields)) * 100
             
             # Calculate quality score based on data richness
             quality = 0
             if values.get('personal_info') and values.get('personal_info').contact:
                 quality += 20
-            if values.get('work_experience'):
-                quality += min(len(values['work_experience']) * 10, 40)
-            if values.get('skills'):
-                quality += min(len(values['skills']) * 2, 20)
-            if values.get('education'):
-                quality += min(len(values['education']) * 10, 20)
+            if work_exp := values.get('work_experience'):
+                quality += min(len(work_exp) * 10, 40)
+            if skills := values.get('skills'):
+                quality += min(len(skills) * 2, 20)
+            if education := values.get('education'):
+                quality += min(len(education) * 10, 20)
             
             values['quality_score'] = min(quality, 100)
             
         except Exception:
-            # If calculation fails, set default values
             values['completeness_score'] = 0
             values['quality_score'] = 0
         
@@ -414,7 +392,7 @@ class CVSearchFilters(BaseModel):
     has_certifications: Optional[bool] = Field(None, description="Has certifications")
     languages: Optional[List[str]] = Field(None, description="Required languages")
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validate_experience_range(cls, values):
         min_exp = values.get('min_experience')
         max_exp = values.get('max_experience')

@@ -227,7 +227,20 @@ class AuthService:
             return TokenResponse(
                 access_token=access_token,
                 refresh_token=new_refresh_token,
-                expires_in=settings.access_token_expire_minutes * 60
+                token_type="bearer",
+                expires_in=settings.access_token_expire_minutes * 60,
+                user=UserResponse(
+                    user_id=user.user_id,
+                    email=user.email,
+                    full_name=user.full_name,
+                    phone=user.phone,
+                    role=user.role,
+                    status=user.status,
+                    email_verified=user.email_verified,
+                    created_at=user.created_at,
+                    updated_at=user.updated_at,
+                    last_login=user.last_login
+                )
             )
 
         except HTTPException:

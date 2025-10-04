@@ -9,13 +9,13 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.cv_storage import cv_storage_service
 from app.schemas.cv import (
-    CVUploadResponse, CVStatusResponse, CVAnalysisResultResponse,
+    CVUploadResponse, CVAnalysisResponse,
     CVSearchRequest, CVSearchResponse, CVUpdateRequest, CVUpdateResponse,
     CVDeleteRequest, CVDeleteResponse, CVStatsResponse, CVExportRequest, CVExportResponse
 )
 from app.utils.rate_limit import rate_limit_dependency
 
-router = APIRouter()
+router = APIRouter(tags=["CV Analysis"])
 logger = logging.getLogger(__name__)
 
 

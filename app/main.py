@@ -35,7 +35,33 @@ app = FastAPI(
     version=settings.app_version,
     description="AI-powered resume analysis and job matching system",
     debug=settings.debug,
-    lifespan=lifespan
+    lifespan=lifespan,
+    openapi_tags=[
+        {
+            "name": "Health Check",
+            "description": "System health and status endpoints"
+        },
+        {
+            "name": "Authentication", 
+            "description": "User authentication, registration, login, logout, password reset"
+        },
+        {
+            "name": "File Upload",
+            "description": "CV/Resume file upload and management"
+        },
+        {
+            "name": "CV Analysis",
+            "description": "CV analysis, storage, search and analytics"
+        },
+        {
+            "name": "Text Extraction",
+            "description": "AWS Textract integration for document text extraction"
+        },
+        {
+            "name": "Job Matching",
+            "description": "Job matching and recommendation system"
+        }
+    ]
 )
 
 # Add CORS middleware
@@ -75,20 +101,21 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Health check endpoint
-@app.get("/health")
+@app.get("/health", tags=["Health Check"])
 async def health_check():
-    """Health check endpoint"""
+    """System health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": time.time(),
+        "service": "AI Resume Analyzer & Job Match API",
         "version": settings.app_version
     }
 
 
 # Root endpoint
-@app.get("/")
+@app.get("/", tags=["Health Check"])
 async def root():
-    """Root endpoint"""
+    """Root endpoint with API information"""
     return {
         "message": "AI Resume Analyzer & Job Match API",
         "version": settings.app_version,

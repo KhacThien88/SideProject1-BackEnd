@@ -188,6 +188,7 @@ async def get_current_user_info(request: Request, current_user: User = Depends(g
             status=current_user.status,
             email_verified=current_user.email_verified,
             created_at=current_user.created_at,
+            updated_at=current_user.updated_at,
             last_login=current_user.last_login
         )
     

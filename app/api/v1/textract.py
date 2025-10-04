@@ -16,7 +16,7 @@ from app.services.s3 import s3_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["Text Extraction"])
 
 
 class TextExtractionRequest(BaseModel):

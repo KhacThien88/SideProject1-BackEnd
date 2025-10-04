@@ -9,19 +9,53 @@ import hashlib
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.core.security import verify_token
+from app.models.user import User
 from app.services.upload import UploadService
 from app.utils.validators import validate_file_type, validate_file_size
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["File Upload"])
+
+# Security scheme
+security = HTTPBearer()
 
 # Upload service instance
 upload_service = UploadService()
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Get current authenticated user from JWT token"""
+    try:
+        token = credentials.credentials
+        payload = verify_token(token, "access")
+        user_id = payload.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+        
+        return {
+            "user_id": user_id,
+            "email": payload.get("email"),
+            "role": payload.get("role")
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
 
 
 class UploadResponse(BaseModel):
@@ -43,37 +77,6 @@ class UploadStatusResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
-
-
-async def get_current_user(request: Request):
-    """Dependency để lấy current user từ JWT token"""
-    try:
-        # Lấy token từ Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid authorization header"
-            )
-        
-        token = auth_header.split(" ")[1]
-        payload = verify_token(token, "access")
-        user_id = payload.get("user_id")
-        
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload"
-            )
-        
-        return {"user_id": user_id, "email": payload.get("email")}
-    
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
 
 
 @router.post("/cv", response_model=UploadResponse)

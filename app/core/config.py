@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # S3 Configuration
     s3_bucket_name: str = "ai-resume-analyzer-cv-uploads"
     s3_region: str = "us-east-1"
+    s3_access_key_id: Optional[str] = None
+    s3_secret_access_key: Optional[str] = None
+    s3_endpoint_url: Optional[str] = None
+    s3_use_ssl: bool = True
     
     # DynamoDB Table Names
     users_table_name: str = "ai-resume-analyzer-users"
