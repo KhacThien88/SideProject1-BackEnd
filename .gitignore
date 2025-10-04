@@ -194,6 +194,10 @@ pids
 *.seed
 *.pid.lock
 
+#MCP
+package-lock.json
+package.json
+
 # Coverage directory used by tools like istanbul
 coverage/
 *.lcov
@@ -309,6 +313,10 @@ settings.local.py
 test_files/
 sample_data/
 mock_data/
+test_registration.json
+*_SUMMARY.md
+FINAL_API_STATUS.md
+README_API_TESTING.md
 
 # Documentation build
 docs/build/
@@ -343,3 +351,6 @@ credentials.json
 # Local development
 local/
 dev/
+
+# Scripts folder (development/testing scripts)
+scripts/
