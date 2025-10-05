@@ -1,9 +1,11 @@
 """
-Email Service với AWS SES Integration
+Email Service dùng SMTP (ví dụ Gmail SMTP)
 Xử lý gửi email verification và các loại email khác
 """
 
-import boto3
+import smtplib
+import ssl
+from email.utils import make_msgid
 import secrets
 import hashlib
 from datetime import datetime, timedelta
@@ -22,15 +24,9 @@ logger = get_logger(__name__)
 
 
 class EmailService:
-    """Service để gửi email qua AWS SES"""
+    """Service để gửi email qua SMTP"""
     
     def __init__(self):
-        self.ses_client = boto3.client(
-            'ses',
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
-        )
         self.dynamodb = get_dynamodb_resource()
         
     async def send_otp_verification_email(
@@ -74,7 +70,7 @@ class EmailService:
                 otp_code
             )
             
-            # Gửi email qua SES
+            # Gửi email qua SMTP
             response = await self._send_email(
                 to_email=email,
                 subject="Mã xác thực tài khoản - AI Resume Analyzer",
@@ -123,7 +119,7 @@ class EmailService:
             # Render email template
             email_content = await self._render_password_reset_template(reset_url)
             
-            # Gửi email qua SES
+            # Gửi email qua SMTP
             response = await self._send_email(
                 to_email=email,
                 subject="Đặt lại mật khẩu - AI Resume Analyzer",
@@ -303,27 +299,46 @@ class EmailService:
         html_content: str,
         text_content: str
     ) -> Dict[str, Any]:
-        """Gửi email qua AWS SES"""
-        
-        # Kiểm tra verified email addresses
-        verified_emails = self.ses_client.list_verified_email_addresses()
-        if settings.ses_from_email not in verified_emails['VerifiedEmailAddresses']:
-            raise Exception("Sender email is not verified in SES")
-        
-        # Gửi email
-        response = self.ses_client.send_email(
-            Source=settings.ses_from_email,
-            Destination={'ToAddresses': [to_email]},
-            Message={
-                'Subject': {'Data': subject, 'Charset': 'UTF-8'},
-                'Body': {
-                    'Html': {'Data': html_content, 'Charset': 'UTF-8'},
-                    'Text': {'Data': text_content, 'Charset': 'UTF-8'}
-                }
-            }
-        )
-        
-        return response
+        """Gửi email qua SMTP (Gmail)."""
+
+        # Tạo message multipart (text/plain và text/html)
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = settings.from_email
+        msg['To'] = to_email
+        message_id = make_msgid()
+        msg['Message-ID'] = message_id
+
+        part_text = MIMEText(text_content, 'plain', 'utf-8')
+        part_html = MIMEText(html_content, 'html', 'utf-8')
+        msg.attach(part_text)
+        msg.attach(part_html)
+
+        host = settings.smtp_host or "smtp.gmail.com"
+        port = settings.smtp_port or 587
+
+        if settings.smtp_use_tls:
+            with smtplib.SMTP(host, port) as server:
+                server.ehlo()
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+                if settings.smtp_user and settings.smtp_pass:
+                    server.login(settings.smtp_user, settings.smtp_pass)
+                server.sendmail(settings.from_email, [to_email], msg.as_string())
+        else:
+            # Nếu không dùng TLS, ưu tiên SMTP_SSL khi port 465, ngược lại dùng SMTP thường
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as server:
+                    if settings.smtp_user and settings.smtp_pass:
+                        server.login(settings.smtp_user, settings.smtp_pass)
+                    server.sendmail(settings.from_email, [to_email], msg.as_string())
+            else:
+                with smtplib.SMTP(host, port) as server:
+                    if settings.smtp_user and settings.smtp_pass:
+                        server.login(settings.smtp_user, settings.smtp_pass)
+                    server.sendmail(settings.from_email, [to_email], msg.as_string())
+
+        return {"MessageId": message_id.strip('<>')}
     
     async def _render_otp_verification_template(
         self, 

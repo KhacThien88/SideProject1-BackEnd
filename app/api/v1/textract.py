@@ -66,7 +66,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
                 detail="Invalid token payload"
             )
         
-        return {"user_id": user_id, "email": payload.get("email")}
+        return {
+            "user_id": user_id, 
+            "email": payload.get("email"),
+            "role": payload.get("role", "candidate")
+        }
     
     except HTTPException:
         raise
@@ -78,7 +82,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         )
 
 
-@router.post("/extract", response_model=TextExtractionResponse)
+@router.post("/extract", response_model=TextExtractionResponse,
+            summary="Trích xuất văn bản từ S3",
+            description="Trích xuất văn bản từ CV đã upload lên S3 sử dụng AWS Textract. Hỗ trợ PDF, images và documents.")
 async def extract_text_from_cv(
     extraction_request: TextExtractionRequest,
     current_user: dict = Depends(get_current_user)
@@ -94,7 +100,8 @@ async def extract_text_from_cv(
         logger.info(f"Text extraction request for {extraction_request.s3_key} by user {current_user['user_id']}")
         
         # Verify user has access to the file
-        if not extraction_request.s3_key.startswith(f"user-uploads/{current_user['user_id']}/"):
+        # Admin can access all files, regular users can only access their own files
+        if current_user["role"] != "admin" and not extraction_request.s3_key.startswith(f"user-uploads/{current_user['user_id']}/"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this file"
@@ -243,7 +250,9 @@ async def get_extraction_status(
         )
 
 
-@router.get("/health")
+@router.get("/health",
+           summary="Kiểm tra sức khỏe Textract",
+           description="Kiểm tra trạng thái hoạt động của dịch vụ AWS Textract.")
 async def textract_health_check():
     """
     Health check cho Textract service

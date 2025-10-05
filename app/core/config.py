@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Database
     dynamodb_region: str = "us-east-1"
     dynamodb_endpoint_url: Optional[str] = None
+    use_dynamodb: bool = True
+    dynamodb_use_local: bool = False
+    dynamodb_local_endpoint: Optional[str] = None  # ví dụ: http://localhost:8000
     database_url: Optional[str] = None
     
     # JWT
@@ -37,11 +40,11 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     from_email: str = "noreply@example.com"
     
-    # AWS SES
+    # AWS (Dùng cho S3/DynamoDB). Hệ thống email hiện dùng SMTP Gmail, không dùng SES
     aws_region: str = "us-east-1"
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
-    ses_from_email: str = "noreply@example.com"
+    # ses_from_email: str = "noreply@example.com"  # Deprecated: email chuyển sang SMTP, không dùng SES
     frontend_url: str = "http://localhost:3000"
     
     # File Upload
@@ -56,6 +59,7 @@ class Settings(BaseSettings):
     s3_secret_access_key: Optional[str] = None
     s3_endpoint_url: Optional[str] = None
     s3_use_ssl: bool = True
+    use_s3: bool = True
     
     # DynamoDB Table Names
     users_table_name: str = "ai-resume-analyzer-users"

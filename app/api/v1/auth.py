@@ -57,7 +57,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         )
 
 
-@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED,
+            summary="Đăng ký tài khoản mới",
+            description="Tạo tài khoản người dùng mới với email và mật khẩu. Gửi OTP qua email để xác thực.")
 async def register(request: Request, user_data: UserRegisterRequest):
     """Register a new user account"""
     try:
@@ -89,7 +91,9 @@ async def register(request: Request, user_data: UserRegisterRequest):
         )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse,
+            summary="Đăng nhập",
+            description="Đăng nhập bằng email và mật khẩu. Trả về access token và refresh token.")
 async def login(request: Request, login_data: UserLoginRequest):
     """
     Authenticate user and return access tokens
@@ -124,7 +128,9 @@ async def login(request: Request, login_data: UserLoginRequest):
         )
 
 
-@router.post("/logout", response_model=dict)
+@router.post("/logout", response_model=dict,
+            summary="Đăng xuất",
+            description="Đăng xuất và vô hiệu hóa token hiện tại.")
 async def logout(request: Request, current_user: User = Depends(get_current_user)):
     """Logout user and invalidate session"""
     try:
@@ -173,7 +179,9 @@ async def refresh_token(request: Request, refresh_data: RefreshTokenRequest):
         )
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserResponse,
+           summary="Lấy thông tin cá nhân",
+           description="Lấy thông tin chi tiết của người dùng hiện tại.")
 async def get_current_user_info(request: Request, current_user: User = Depends(get_current_user)):
     """Get current user information"""
     try:
