@@ -7,7 +7,7 @@ import logging
 import time
 
 from app.core.config import settings
-from app.api.v1 import auth, upload, textract, cv_storage, admin, cv_admin
+from app.api.v1 import auth, upload, textract, cv_storage, admin, cv_admin, jobs
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 
@@ -149,6 +149,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(upload.router, prefix="/api/v1")
 app.include_router(textract.router, prefix="/api/v1/textract")
 app.include_router(cv_storage.router, prefix="/api/v1")
+app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(cv_admin.router, prefix="/api/v1")
 
