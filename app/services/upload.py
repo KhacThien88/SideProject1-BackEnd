@@ -21,21 +21,10 @@ from app.core.config import settings
 from app.core.database import get_dynamodb_resource
 from app.utils.logger import get_logger
 from app.utils.validators import validate_file_type, validate_file_size
+from app.utils.helpers import convert_decimals
 from app.services.s3 import s3_service
 
 logger = get_logger(__name__)
-
-
-def convert_decimals(obj):
-    """Convert Decimal objects to int/float for JSON serialization"""
-    if isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    elif isinstance(obj, dict):
-        return {key: convert_decimals(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_decimals(item) for item in obj]
-    else:
-        return obj
 
 
 class UploadService:

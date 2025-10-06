@@ -53,7 +53,7 @@ def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)
 
 
 @router.get("/users", response_model=List[UserResponse],
-           summary="Liệt kê tất cả người dùng",
+           summary="List All Users",
            description="Lấy danh sách tất cả người dùng trong hệ thống. Chỉ dành cho quản trị viên.")
 async def list_all_users(
     request: Request,

@@ -31,40 +31,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="CV Management & Analysis API",
-    description="""
-    ## 🎯 Hệ thống Quản lý và Phân tích CV Chuyên nghiệp
-
-    API toàn diện cho việc quản lý, phân tích và tìm kiếm CV với các tính năng:
-
-    ### 🔑 Tính năng chính:
-    - **Xác thực & Phân quyền**: Đăng ký, đăng nhập, quản lý token JWT
-    - **Upload CV**: Tải lên CV với nhiều định dạng (PDF, DOC, images)
-    - **Trích xuất văn bản**: Sử dụng AWS Textract để trích xuất nội dung
-    - **Phân tích CV**: AI-powered analysis và structured data extraction
-    - **Tìm kiếm thông minh**: Tìm kiếm CV theo kỹ năng, kinh nghiệm
-    - **Quản trị hệ thống**: Công cụ quản lý dành cho admin
-
-    ### 🔐 Xác thực:
-    - **Bearer Token**: Sử dụng JWT token trong header `Authorization: Bearer <token>`
-    - **Role-based Access**: Phân quyền user/admin cho các chức năng khác nhau
-
-    ### 📋 Lưu ý quan trọng:
-    - Tất cả API yêu cầu xác thực (trừ register/login)
-    - File size tối đa: 10MB
-    - Supported formats: PDF, DOC, DOCX, PNG, JPG, JPEG
-    - Rate limiting: 100 requests/minute per IP
-
-    ### 🏗️ Kiến trúc:
-    - **Database**: PostgreSQL với SQLAlchemy ORM
-    - **Storage**: AWS S3 cho file storage
-    - **AI Services**: AWS Textract + Custom ML models
-    - **Cache**: Redis cho session management
-    """,
-    version="2.0.0",
+    title="🎯 CV Management & Analysis API",
+    description="Professional CV management system with AI-powered analysis",
+    version="2.1.0",
     contact={
-        "name": "CV Management Team",
+        "name": "🎯 CV Management Team",
         "email": "support@cvmanagement.com",
+        "url": "https://cvmanagement.com/support"
     },
     license_info={
         "name": "MIT License",
@@ -73,45 +46,31 @@ app = FastAPI(
     servers=[
         {
             "url": "http://localhost:8000",
-            "description": "Development server"
+            "description": "🛠️ Development Server - Local testing"
         },
         {
             "url": "https://api.cvmanagement.com",
-            "description": "Production server"
+            "description": "🚀 Production Server - Live environment"
+        },
+        {
+            "url": "https://staging-api.cvmanagement.com",
+            "description": "🧪 Staging Server - Pre-production testing"
         }
     ],
     debug=settings.debug,
     lifespan=lifespan,
     openapi_tags=[
-        {
-            "name": "Health Check",
-            "description": "🏥 **Kiểm tra sức khỏe hệ thống**\n\nEndpoints để kiểm tra trạng thái hoạt động của API và các dịch vụ liên quan."
-        },
-        {
-            "name": "Authentication", 
-            "description": "🔐 **Xác thực và quản lý người dùng**\n\nĐăng ký, đăng nhập, đăng xuất, làm mới token, xác thực OTP, quên mật khẩu và cập nhật thông tin cá nhân."
-        },
-        {
-            "name": "File Upload",
-            "description": "📁 **Tải lên và quản lý CV**\n\nUpload CV files, kiểm tra trạng thái upload, xóa files và lấy danh sách CV của người dùng."
-        },
-        {
-            "name": "Text Extraction",
-            "description": "📄 **Trích xuất văn bản từ CV**\n\nSử dụng AWS Textract để trích xuất và phân tích nội dung văn bản từ CV documents (PDF, DOC, images)."
-        },
-        {
-            "name": "CV Analysis",
-            "description": "🔍 **Phân tích và tìm kiếm CV**\n\nPhân tích nội dung CV, tìm kiếm CV theo tiêu chí, xuất dữ liệu và xem thống kê phân tích."
-        },
-        {
-            "name": "Admin",
-            "description": "👑 **Quản trị hệ thống**\n\n**Chỉ dành cho Admin**: Quản lý người dùng, xem danh sách users, xóa tài khoản."
-        },
-        {
-            "name": "Admin CV Management",
-            "description": "📋 **Quản lý CV cho Admin**\n\n**Chỉ dành cho Admin**: Xem tất cả CV, download, trích xuất văn bản và xóa CV của bất kỳ người dùng nào."
-        }
-    ]
+        {"name": "Health Check"},
+        {"name": "Authentication"},
+        {"name": "File Upload"},
+        {"name": "Text Extraction"},
+        {"name": "CV Analysis"},
+        {"name": "Admin"},
+        {"name": "Admin CV Management"}
+    ],
+    openapi_url="/api/v1/openapi.json" if not settings.debug else "/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Add CORS middleware
@@ -167,10 +126,21 @@ async def health_check():
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "AI Resume Analyzer & Job Match API",
+        "message": "🎯 AI Resume Analyzer & Job Match API",
         "version": settings.app_version,
+        "status": "running",
         "docs": "/docs",
-        "health": "/health"
+        "redoc": "/redoc",
+        "health": "/health",
+        "openapi": "/openapi.json",
+        "features": [
+            "🔐 JWT Authentication",
+            "📁 File Upload & Management", 
+            "📄 OCR Text Extraction",
+            "🤖 AI-Powered CV Analysis",
+            "🔍 Semantic Search",
+            "👑 Admin Management"
+        ]
     }
 
 

@@ -83,7 +83,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 
 @router.post("/extract", response_model=TextExtractionResponse,
-            summary="Trích xuất văn bản từ S3",
+            summary="Extract Text from S3",
             description="Trích xuất văn bản từ CV đã upload lên S3 sử dụng AWS Textract. Hỗ trợ PDF, images và documents.")
 async def extract_text_from_cv(
     extraction_request: TextExtractionRequest,
@@ -251,7 +251,7 @@ async def get_extraction_status(
 
 
 @router.get("/health",
-           summary="Kiểm tra sức khỏe Textract",
+           summary="Check Textract Health",
            description="Kiểm tra trạng thái hoạt động của dịch vụ AWS Textract.")
 async def textract_health_check():
     """

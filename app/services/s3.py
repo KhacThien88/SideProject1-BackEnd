@@ -32,7 +32,7 @@ class S3Service:
                 self.region = settings.aws_region
                 return
             # Kiểm tra nếu đang chạy test thì skip verification
-            if os.environ.get('PYTEST_CURRENT_TEST'):
+            if getattr(settings, 'test_mode', False):
                 logger.info("Running in test mode, skipping S3 bucket verification")
                 self.s3_client = None
                 self.bucket_name = settings.s3_bucket_name

@@ -12,6 +12,7 @@ from app.schemas.user import (
 from app.services.auth_service import AuthService
 from app.services.email import email_service
 from app.core.security import verify_token
+from app.core.config import settings
 from app.models.user import User
 
 logging.basicConfig(level=logging.INFO)
@@ -57,9 +58,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         )
 
 
-@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED,
-            summary="Đăng ký tài khoản mới",
-            description="Tạo tài khoản người dùng mới với email và mật khẩu. Gửi OTP qua email để xác thực.")
+@router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def register(request: Request, user_data: UserRegisterRequest):
     """Register a new user account"""
     try:
@@ -91,9 +90,7 @@ async def register(request: Request, user_data: UserRegisterRequest):
         )
 
 
-@router.post("/login", response_model=TokenResponse,
-            summary="Đăng nhập",
-            description="Đăng nhập bằng email và mật khẩu. Trả về access token và refresh token.")
+@router.post("/login", response_model=TokenResponse)
 async def login(request: Request, login_data: UserLoginRequest):
     """
     Authenticate user and return access tokens
@@ -129,8 +126,8 @@ async def login(request: Request, login_data: UserLoginRequest):
 
 
 @router.post("/logout", response_model=dict,
-            summary="Đăng xuất",
-            description="Đăng xuất và vô hiệu hóa token hiện tại.")
+            summary="Logout",
+            description="Logout and invalidate current token")
 async def logout(request: Request, current_user: User = Depends(get_current_user)):
     """Logout user and invalidate session"""
     try:
@@ -180,8 +177,8 @@ async def refresh_token(request: Request, refresh_data: RefreshTokenRequest):
 
 
 @router.get("/me", response_model=UserResponse,
-           summary="Lấy thông tin cá nhân",
-           description="Lấy thông tin chi tiết của người dùng hiện tại.")
+           summary="Get Current User Info",
+           description="Get detailed information of current user")
 async def get_current_user_info(request: Request, current_user: User = Depends(get_current_user)):
     """Get current user information"""
     try:
@@ -267,10 +264,10 @@ async def update_current_user(
 @router.post("/verify-otp", response_model=dict)
 async def verify_otp(request: Request, otp_data: OTPVerificationRequest):
     """
-    Verify OTP code để kích hoạt tài khoản
+    Verify OTP code to activate account
     
-    - **email**: Email của user
-    - **otp_code**: Mã OTP 6 số
+    - **email**: User's email address
+    - **otp_code**: 6-digit OTP code
     """
     try:
         logger.info(f"OTP verification attempt for email: {otp_data.email}")
@@ -304,9 +301,9 @@ async def verify_otp(request: Request, otp_data: OTPVerificationRequest):
 @router.post("/resend-otp", response_model=dict)
 async def resend_otp(request: Request, resend_data: ResendOTPRequest):
     """
-    Gửi lại mã OTP verification
+    Resend OTP verification code
     
-    - **email**: Email của user cần gửi lại OTP
+    - **email**: User's email address to resend OTP
     """
     try:
         logger.info(f"Resend OTP attempt for email: {resend_data.email}")
@@ -342,16 +339,16 @@ async def forgot_password(request: Request, email: str):
     try:
         logger.info(f"Forgot password request for: {email}")
         
-        # Tìm user theo email
+        # Find user by email
         user = auth_service.user_repo.get_user_by_email(email)
         if not user:
-            # Không tiết lộ thông tin về user tồn tại hay không
+            # Don't reveal whether user exists or not
             logger.info(f"Password reset requested for non-existent email: {email}")
             return {
                 "message": "If the email exists, a password reset link has been sent"
             }
         
-        # Gửi password reset email
+        # Send password reset email
         result = await email_service.send_password_reset_email(email, user.user_id)
         
         if not result["success"]:

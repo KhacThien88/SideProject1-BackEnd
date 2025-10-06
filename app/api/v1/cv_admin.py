@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from io import BytesIO
 
-from app.core.security import verify_token
+from app.core.security import get_admin_user
 from app.models.user import User, UserRole
 from app.services.auth_service import AuthService
 from app.services.upload import upload_service
@@ -23,56 +23,19 @@ router = APIRouter(prefix="/admin/cv", tags=["Admin CV Management"])
 auth_service = AuthService()
 
 
-def get_admin_user(request: Request) -> User:
-    """Verify admin user from JWT token"""
-    try:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid authorization header"
-            )
-        
-        token = auth_header.split(" ")[1]
-        payload = verify_token(token, "access")
-        user_id = payload.get("user_id")
-        
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
-        
-        user = auth_service.user_repo.get_user_by_id(user_id)
-        if not user or user.role != UserRole.ADMIN:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin access required"
-            )
-        
-        return user
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error verifying admin user: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate admin credentials"
-        )
 
 
 @router.get("/all", response_model=List[Dict[str, Any]],
-           summary="Liệt kê tất cả CV",
+           summary="List All CVs",
            description="Lấy danh sách tất cả CV trong hệ thống. Chỉ dành cho quản trị viên.")
 async def list_all_cv_files(
     request: Request,
     limit: int = Query(default=50, le=100),
-    admin_user: User = Depends(get_admin_user)
+    admin_user: Dict[str, Any] = Depends(get_admin_user)
 ):
     """List all CV files from all users (Admin only)"""
     try:
-        logger.info(f"Admin {admin_user.user_id} requesting all CV files")
+        logger.info(f"Admin {admin_user['user_id']} requesting all CV files")
         
         # Get all CV files from S3
         s3_result = await s3_service.list_user_files(
@@ -139,11 +102,11 @@ async def list_all_cv_files(
 async def get_user_cv_files_admin(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(get_admin_user)
+    admin_user: Dict[str, Any] = Depends(get_admin_user)
 ):
     """Get CV files for specific user (Admin only)"""
     try:
-        logger.info(f"Admin {admin_user.user_id} requesting CV files for user {user_id}")
+        logger.info(f"Admin {admin_user['user_id']} requesting CV files for user {user_id}")
         
         # Get user info
         target_user = auth_service.user_repo.get_user_by_id(user_id)
@@ -190,11 +153,11 @@ async def get_user_cv_files_admin(
 async def download_cv_file_admin(
     file_id: str,
     request: Request,
-    admin_user: User = Depends(get_admin_user)
+    admin_user: Dict[str, Any] = Depends(get_admin_user)
 ):
     """Download CV file by file_id (Admin only)"""
     try:
-        logger.info(f"Admin {admin_user.user_id} downloading file {file_id}")
+        logger.info(f"Admin {admin_user['user_id']} downloading file {file_id}")
         
         # Get file metadata from database
         from app.core.database import get_dynamodb_resource
@@ -247,11 +210,11 @@ async def download_cv_file_admin(
 async def extract_text_from_cv_admin(
     file_id: str,
     request: Request,
-    admin_user: User = Depends(get_admin_user)
+    admin_user: Dict[str, Any] = Depends(get_admin_user)
 ):
     """Extract text from CV file by file_id (Admin only)"""
     try:
-        logger.info(f"Admin {admin_user.user_id} extracting text from file {file_id}")
+        logger.info(f"Admin {admin_user['user_id']} extracting text from file {file_id}")
         
         # Get file metadata from database
         from app.core.database import get_dynamodb_resource
@@ -311,11 +274,11 @@ async def extract_text_from_cv_admin(
 async def delete_cv_file_admin(
     file_id: str,
     request: Request,
-    admin_user: User = Depends(get_admin_user)
+    admin_user: Dict[str, Any] = Depends(get_admin_user)
 ):
     """Delete CV file by file_id (Admin only)"""
     try:
-        logger.info(f"Admin {admin_user.user_id} deleting file {file_id}")
+        logger.info(f"Admin {admin_user['user_id']} deleting file {file_id}")
         
         # Get file metadata from database
         from app.core.database import get_dynamodb_resource
@@ -345,7 +308,7 @@ async def delete_cv_file_admin(
         # Delete from database
         table.delete_item(Key={'file_id': file_id})
         
-        logger.info(f"File {file_id} ({filename}) deleted by admin {admin_user.user_id}")
+        logger.info(f"File {file_id} ({filename}) deleted by admin {admin_user['user_id']}")
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,

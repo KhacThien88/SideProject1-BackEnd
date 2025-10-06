@@ -77,7 +77,7 @@ async def get_current_user(request: Request):
 
 
 @router.post("/cv", response_model=UploadResponse,
-            summary="Tải lên CV",
+            summary="Upload CV",
             description="Upload file CV (PDF, DOC, DOCX, JPG, PNG). Tự động validate file type và size.")
 async def upload_cv(
     request: Request,
@@ -151,7 +151,7 @@ async def upload_cv(
 
 
 @router.get("/cv/{file_id}/status", response_model=UploadStatusResponse,
-           summary="Kiểm tra trạng thái upload",
+           summary="Check Upload Status",
            description="Lấy trạng thái hiện tại của file đã upload (pending, processing, completed, failed).")
 async def get_upload_status(
     file_id: str,

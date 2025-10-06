@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/cv/{cv_id}", response_model=Dict[str, Any],
-           summary="Lấy CV theo ID",
+           summary="Get CV by ID",
            description="Lấy thông tin chi tiết của CV theo ID. Chỉ chủ sở hữu mới có thể truy cập.")
 async def get_cv_by_id(
     cv_id: str,
@@ -201,7 +201,7 @@ async def get_analysis_result(
 
 
 @router.post("/cv/search", response_model=Dict[str, Any],
-            summary="Tìm kiếm CV",
+            summary="Search CVs",
             description="Tìm kiếm CV theo từ khóa, kỹ năng, kinh nghiệm và các tiêu chí khác.")
 async def search_cvs(
     search_request: CVSearchRequest,
