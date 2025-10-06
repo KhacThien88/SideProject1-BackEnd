@@ -1,6 +1,6 @@
 """
 CV Upload API Endpoints
-Xử lý upload CV files với validation và security
+Handle CV file uploads with validation and security
 """
 
 import logging
@@ -46,9 +46,9 @@ class UploadStatusResponse(BaseModel):
 
 
 async def get_current_user(request: Request):
-    """Dependency để lấy current user từ JWT token"""
+    """Dependency to get current user from JWT token"""
     try:
-        # Lấy token từ Authorization header
+        # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(
@@ -78,14 +78,14 @@ async def get_current_user(request: Request):
 
 @router.post("/cv", response_model=UploadResponse,
             summary="Upload CV",
-            description="Upload file CV (PDF, DOC, DOCX, JPG, PNG). Tự động validate file type và size.")
+            description="Upload CV file (PDF, DOC, DOCX, JPG, PNG). Automatically validates file type and size.")
 async def upload_cv(
     request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Upload CV file với validation và security
+    Upload CV file with validation and security
     
     - **file**: CV file (PDF, DOC, DOCX) - max 10MB
     - **Authentication**: Required (JWT token)
@@ -152,15 +152,15 @@ async def upload_cv(
 
 @router.get("/cv/{file_id}/status", response_model=UploadStatusResponse,
            summary="Check Upload Status",
-           description="Lấy trạng thái hiện tại của file đã upload (pending, processing, completed, failed).")
+           description="Get the current status of the uploaded file (pending, processing, completed, failed).")
 async def get_upload_status(
     file_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lấy trạng thái upload của CV file
+    Get the upload status of CV file
     
-    - **file_id**: ID của file đã upload
+    - **file_id**: ID of the uploaded file
     - **Authentication**: Required
     """
     try:
@@ -202,9 +202,9 @@ async def delete_cv(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Xóa CV file đã upload
+    Delete uploaded CV file
     
-    - **file_id**: ID của file cần xóa
+    - **file_id**: ID of the file to delete
     - **Authentication**: Required
     """
     try:
@@ -246,13 +246,13 @@ async def get_user_cv_files(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lấy danh sách CV files của user
+    Get list of CV files for user
     
-    - **user_id**: ID của user (phải match với current user)
+    - **user_id**: ID of the user (must match current user)
     - **Authentication**: Required
     """
     try:
-        # Kiểm tra user có quyền truy cập không
+        # Check if user has access permission
         # Admin can access any user's files, regular users can only access their own files
         if current_user["role"] != "admin" and current_user["user_id"] != user_id:
             raise HTTPException(

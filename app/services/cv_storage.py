@@ -8,7 +8,6 @@ from datetime import datetime
 
 from app.repositories.cv_storage import CVStorageRepository
 from app.models.cv import CVAnalysis, CVContent
-from app.services.cv_content_parser import cv_content_parser
 from app.services.textract import textract_service
 from app.services.s3 import s3_service
 from app.utils.logger import get_logger
@@ -106,19 +105,11 @@ class CVStorageService:
                 )
                 return textract_result
             
-            # Parse CV content using CV Content Parser
-            parsed_content = cv_content_parser.parse_cv_content(textract_result.get('text', ''))
-            
-            # Enhanced analysis with parsed content
-            enhanced_analysis = {
-                **textract_result.get('analysis_result', {}),
-                'parsed_sections': parsed_content.get('sections', {}),
-                'key_information': parsed_content.get('key_information', {}),
-                'structured_data': parsed_content
-            }
+            # Parse analysis result
+            analysis_data = textract_result.get('analysis_result', {})
             
             # Create CVAnalysis object
-            analysis = CVAnalysis(**enhanced_analysis)
+            analysis = CVAnalysis(**analysis_data)
             
             # Create CVContent object
             content_data = textract_result.get('raw_content', {})

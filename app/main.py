@@ -31,30 +31,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="🎯 CV Management & Analysis API",
+    title="CV Management API",
     description="Professional CV management system with AI-powered analysis",
     version="2.1.0",
     contact={
-        "name": "🎯 CV Management Team",
-        "email": "support@cvmanagement.com",
-        "url": "https://cvmanagement.com/support"
+        "name": "CV Management Team",
+        "email": "support@cvmanagement.com"
     },
     license_info={
         "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT",
+        "url": "https://opensource.org/licenses/MIT"
     },
     servers=[
         {
             "url": "http://localhost:8000",
-            "description": "🛠️ Development Server - Local testing"
-        },
-        {
-            "url": "https://api.cvmanagement.com",
-            "description": "🚀 Production Server - Live environment"
-        },
-        {
-            "url": "https://staging-api.cvmanagement.com",
-            "description": "🧪 Staging Server - Pre-production testing"
+            "description": "Development Server"
         }
     ],
     debug=settings.debug,
@@ -65,6 +56,7 @@ app = FastAPI(
         {"name": "File Upload"},
         {"name": "Text Extraction"},
         {"name": "CV Analysis"},
+        {"name": "Job Matching"},
         {"name": "Admin"},
         {"name": "Admin CV Management"}
     ],

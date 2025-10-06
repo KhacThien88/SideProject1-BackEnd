@@ -5,9 +5,6 @@ import logging
 
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.job_description_parser import job_description_parser
-from app.services.search_query_parser import search_query_parser
-from app.services.data_validation_parser import data_validation_parser
 from app.services.job_filter import job_filter_service
 from app.repositories.job_match import job_match_repository
 from app.schemas.job import (
@@ -92,40 +89,38 @@ async def custom_job_search(
     try:
         logger.info(f"Custom job search request by user {current_user.user_id}")
         
-        # Parse search criteria using Search Query Parser
-        parsed_query = search_query_parser.parse_search_query(str(search_criteria))
-        
-        # Validate parsed query
-        validation_result = search_query_parser.validate_query(parsed_query)
-        
-        if not validation_result['is_valid']:
-            logger.warning(f"Invalid search query: {validation_result['errors']}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid search query: {', '.join(validation_result['errors'])}"
-            )
+        # Extract search criteria
+        keywords = search_criteria.get("keywords", [])
+        location = search_criteria.get("location", "")
+        salary_min = search_criteria.get("salary_min")
+        salary_max = search_criteria.get("salary_max")
+        job_type = search_criteria.get("job_type", [])
+        experience_level = search_criteria.get("experience_level", "")
+        skills = search_criteria.get("skills", [])
         
         # TODO: Get actual job data from database/external API
         # For now, use empty list as placeholder
         all_jobs = []
         
-        # Apply filters using JobFilterService with parsed query
-        filtered_jobs = job_filter_service.apply_complex_filters(all_jobs, parsed_query['filters'])
+        # Apply filters using JobFilterService
+        filtered_jobs = job_filter_service.apply_complex_filters(all_jobs, search_criteria)
         
-        # Enhanced results with parsing metadata
+        # Mock response for now
         results = {
             "search_criteria": search_criteria,
-            "parsed_query": parsed_query,
-            "validation_result": validation_result,
             "total_results": len(filtered_jobs),
             "jobs": filtered_jobs,
-            "filters_applied": parsed_query['filters'],
+            "filters_applied": {
+                "keywords": keywords,
+                "location": location,
+                "salary_range": f"{salary_min}-{salary_max}" if salary_min and salary_max else None,
+                "job_type": job_type,
+                "experience_level": experience_level,
+                "skills": skills
+            },
             "search_metadata": {
                 "search_time": datetime.utcnow().isoformat(),
-                "user_id": current_user.user_id,
-                "query_complexity": parsed_query['metadata']['complexity_score'],
-                "parsing_errors": validation_result.get('errors', []),
-                "parsing_warnings": validation_result.get('warnings', [])
+                "user_id": current_user.user_id
             }
         }
         
@@ -171,139 +166,6 @@ async def get_match_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during history retrieval"
-        )
-
-
-@router.post("/parse-job-description", response_model=Dict[str, Any],
-            summary="Parse Job Description",
-            description="Parse job description text into structured data")
-async def parse_job_description(
-    request: Request,
-    job_description: Dict[str, str],
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Parse job description into structured data
-    
-    - **job_description**: Dictionary containing job description text
-    """
-    try:
-        logger.info(f"Job description parsing request by user {current_user.user_id}")
-        
-        # Validate input data
-        validation_schema = {
-            'text': {
-                'required': True,
-                'type': 'string',
-                'max_length': 50000,
-                'sanitize': ['whitespace', 'html', 'sql_injection', 'xss']
-            }
-        }
-        
-        validation_result = data_validation_parser.validate_data(job_description, validation_schema)
-        
-        if not validation_result['is_valid']:
-            logger.warning(f"Invalid job description data: {validation_result['errors']}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid job description: {', '.join(validation_result['errors'])}"
-            )
-        
-        # Parse job description
-        parsed_data = job_description_parser.parse_job_description(
-            validation_result['sanitized_data']['text']
-        )
-        
-        # Enhanced response with validation metadata
-        response_data = {
-            "parsed_data": parsed_data,
-            "validation_result": validation_result,
-            "parsing_metadata": {
-                "parsed_at": datetime.utcnow().isoformat(),
-                "user_id": current_user.user_id,
-                "input_length": len(job_description.get('text', '')),
-                "output_sections": len(parsed_data.get('sections', {})),
-                "data_quality_score": parsed_data.get('metadata', {}).get('total_words', 0) / 100
-            }
-        }
-        
-        logger.info(f"Job description parsing completed. Found {len(parsed_data.get('sections', {}))} sections")
-        return response_data
-    
-    except Exception as e:
-        logger.error(f"Error parsing job description: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during job description parsing"
-        )
-
-
-@router.post("/parse-search-query", response_model=Dict[str, Any],
-            summary="Parse Search Query",
-            description="Parse complex search query into structured filters")
-async def parse_search_query(
-    request: Request,
-    query_data: Dict[str, str],
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Parse search query into structured filters
-    
-    - **query**: Search query string to parse
-    """
-    try:
-        logger.info(f"Search query parsing request by user {current_user.user_id}")
-        
-        # Validate input data
-        validation_schema = {
-            'query': {
-                'required': True,
-                'type': 'string',
-                'max_length': 1000,
-                'sanitize': ['whitespace', 'html', 'sql_injection', 'xss']
-            }
-        }
-        
-        validation_result = data_validation_parser.validate_data(query_data, validation_schema)
-        
-        if not validation_result['is_valid']:
-            logger.warning(f"Invalid search query data: {validation_result['errors']}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid search query: {', '.join(validation_result['errors'])}"
-            )
-        
-        # Parse search query
-        parsed_query = search_query_parser.parse_search_query(
-            validation_result['sanitized_data']['query']
-        )
-        
-        # Validate parsed query
-        query_validation = search_query_parser.validate_query(parsed_query)
-        
-        # Enhanced response with parsing metadata
-        response_data = {
-            "parsed_query": parsed_query,
-            "validation_result": validation_result,
-            "query_validation": query_validation,
-            "parsing_metadata": {
-                "parsed_at": datetime.utcnow().isoformat(),
-                "user_id": current_user.user_id,
-                "query_length": len(query_data.get('query', '')),
-                "complexity_score": parsed_query.get('metadata', {}).get('complexity_score', 0),
-                "filters_count": len(parsed_query.get('filters', [])),
-                "keywords_count": len(parsed_query.get('keywords', []))
-            }
-        }
-        
-        logger.info(f"Search query parsing completed. Complexity: {parsed_query.get('metadata', {}).get('complexity_score', 0)}")
-        return response_data
-    
-    except Exception as e:
-        logger.error(f"Error parsing search query: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during search query parsing"
         )
 
 
