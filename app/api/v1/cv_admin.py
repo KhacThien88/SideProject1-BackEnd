@@ -27,7 +27,7 @@ auth_service = AuthService()
 
 @router.get("/all", response_model=List[Dict[str, Any]],
            summary="List All CVs",
-           description="Lấy danh sách tất cả CV trong hệ thống. Chỉ dành cho quản trị viên.")
+           description="Get a list of all CVs in the system. Admin only.")
 async def list_all_cv_files(
     request: Request,
     limit: int = Query(default=50, le=100),
