@@ -10,6 +10,20 @@ from pydantic import BaseModel, Field, validator, root_validator
 import re
 
 
+# Quality score calculation constants
+QUALITY_SCORE_CONTACT_INFO = 20
+QUALITY_SCORE_PER_WORK_EXPERIENCE = 10
+QUALITY_SCORE_WORK_EXPERIENCE_MAX = 40
+QUALITY_SCORE_PER_SKILL = 2
+QUALITY_SCORE_SKILLS_MAX = 20
+QUALITY_SCORE_PER_EDUCATION = 10
+QUALITY_SCORE_EDUCATION_MAX = 20
+QUALITY_SCORE_MAX = 100
+
+# Validation constants
+MIN_RAW_TEXT_LENGTH = 10
+
+
 class DocumentType(str, Enum):
     """Document types"""
     CV = "cv"
@@ -305,15 +319,24 @@ class CVAnalysis(BaseModel):
             # Calculate quality score based on data richness
             quality = 0
             if values.get('personal_info') and values.get('personal_info').contact:
-                quality += 20
+                quality += QUALITY_SCORE_CONTACT_INFO
             if work_exp := values.get('work_experience'):
-                quality += min(len(work_exp) * 10, 40)
+                quality += min(
+                    len(work_exp) * QUALITY_SCORE_PER_WORK_EXPERIENCE,
+                    QUALITY_SCORE_WORK_EXPERIENCE_MAX
+                )
             if skills := values.get('skills'):
-                quality += min(len(skills) * 2, 20)
+                quality += min(
+                    len(skills) * QUALITY_SCORE_PER_SKILL,
+                    QUALITY_SCORE_SKILLS_MAX
+                )
             if education := values.get('education'):
-                quality += min(len(education) * 10, 20)
+                quality += min(
+                    len(education) * QUALITY_SCORE_PER_EDUCATION,
+                    QUALITY_SCORE_EDUCATION_MAX
+                )
             
-            values['quality_score'] = min(quality, 100)
+            values['quality_score'] = min(quality, QUALITY_SCORE_MAX)
             
         except Exception:
             values['completeness_score'] = 0
@@ -353,8 +376,10 @@ class CVContent(BaseModel):
     
     @validator('raw_text')
     def validate_raw_text(cls, v):
-        if not v or len(v.strip()) < 10:
-            raise ValueError('Raw text must be at least 10 characters')
+        if not v or len(v.strip()) < MIN_RAW_TEXT_LENGTH:
+            raise ValueError(
+                f'Raw text must be at least {MIN_RAW_TEXT_LENGTH} characters'
+            )
         return v.strip()
 
 
