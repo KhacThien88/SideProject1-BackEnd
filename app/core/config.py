@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     # Database
     dynamodb_region: str = "us-east-1"
     dynamodb_endpoint_url: Optional[str] = None
+    dynamodb_table_prefix: str = "cv-management"
+    dynamodb_host: Optional[str] = None
     use_dynamodb: bool = True
     dynamodb_use_local: bool = False
     dynamodb_local_endpoint: Optional[str] = None  # ví dụ: http://localhost:8000
