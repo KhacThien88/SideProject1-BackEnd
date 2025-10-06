@@ -169,8 +169,16 @@ def validate_password_strength(password: str) -> Dict[str, Any]:
         strength_score = 0
     
     # Determine strength level
+    # Map scores to levels: 0-1->weak, 2->medium, 3-4->strong, 5->very_strong
     strength_levels = ["weak", "medium", "strong", "very_strong"]
-    strength_index = min(strength_score // 2, len(strength_levels) - 1)
+    if strength_score <= 1:
+        strength_index = 0  # weak
+    elif strength_score == 2:
+        strength_index = 1  # medium
+    elif strength_score <= 4:
+        strength_index = 2  # strong
+    else:
+        strength_index = 3  # very_strong
     
     return {
         "valid": len(errors) == 0,
