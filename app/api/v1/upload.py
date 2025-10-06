@@ -18,7 +18,7 @@ from app.utils.validators import validate_file_type, validate_file_size
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["File Upload"])
 
 # Upload service instance
 upload_service = UploadService()
@@ -66,7 +66,7 @@ async def get_current_user(request: Request):
                 detail="Invalid token payload"
             )
         
-        return {"user_id": user_id, "email": payload.get("email")}
+        return {"user_id": user_id, "email": payload.get("email"), "role": payload.get("role", "candidate")}
     
     except Exception as e:
         logger.error(f"Authentication error: {str(e)}")
@@ -76,7 +76,9 @@ async def get_current_user(request: Request):
         )
 
 
-@router.post("/cv", response_model=UploadResponse)
+@router.post("/cv", response_model=UploadResponse,
+            summary="Upload CV",
+            description="Upload file CV (PDF, DOC, DOCX, JPG, PNG). Tự động validate file type và size.")
 async def upload_cv(
     request: Request,
     file: UploadFile = File(...),
@@ -148,7 +150,9 @@ async def upload_cv(
         )
 
 
-@router.get("/cv/{file_id}/status", response_model=UploadStatusResponse)
+@router.get("/cv/{file_id}/status", response_model=UploadStatusResponse,
+           summary="Check Upload Status",
+           description="Lấy trạng thái hiện tại của file đã upload (pending, processing, completed, failed).")
 async def get_upload_status(
     file_id: str,
     current_user: dict = Depends(get_current_user)
@@ -249,7 +253,8 @@ async def get_user_cv_files(
     """
     try:
         # Kiểm tra user có quyền truy cập không
-        if current_user["user_id"] != user_id:
+        # Admin can access any user's files, regular users can only access their own files
+        if current_user["role"] != "admin" and current_user["user_id"] != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"

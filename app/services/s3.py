@@ -6,6 +6,7 @@ Comprehensive S3 integration cho file storage với proper organization, securit
 import boto3
 import uuid
 import hashlib
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, BinaryIO
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -21,37 +22,67 @@ class S3Service:
     """Service để quản lý S3 operations với security và organization"""
     
     def __init__(self):
-        """Initialize S3 service với proper configuration"""
+        """Initialize S3 service với AWS credentials. Nếu thiếu credentials, vô hiệu hóa S3 thay vì crash."""
         try:
-            # S3 client configuration
+            # Nếu cấu hình tắt S3, vô hiệu hóa ngay
+            if hasattr(settings, 'use_s3') and not settings.use_s3:
+                logger.info("S3 is disabled by configuration (use_s3=False)")
+                self.s3_client = None
+                self.bucket_name = settings.s3_bucket_name
+                self.region = settings.aws_region
+                return
+            # Kiểm tra nếu đang chạy test thì skip verification
+            if getattr(settings, 'test_mode', False):
+                logger.info("Running in test mode, skipping S3 bucket verification")
+                self.s3_client = None
+                self.bucket_name = settings.s3_bucket_name
+                self.region = settings.aws_region
+                return
+
+            # Configure AWS client với retry config
             config = Config(
                 region_name=settings.aws_region,
-                retries={'max_attempts': 3, 'mode': 'adaptive'},
-                max_pool_connections=50
+                retries={'max_attempts': 3, 'mode': 'adaptive'}
             )
-            
-            self.s3_client = boto3.client(
-                's3',
-                region_name=settings.aws_region,
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-                config=config
-            )
-            
+
+            # Initialize S3 client
+            if settings.aws_access_key_id and settings.aws_secret_access_key:
+                self.s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key,
+                    region_name=settings.aws_region,
+                    config=config
+                )
+            else:
+                # Use default credentials (IAM role, profile, etc.)
+                self.s3_client = boto3.client('s3', region_name=settings.aws_region, config=config)
+
             self.bucket_name = settings.s3_bucket_name
             self.region = settings.aws_region
-            
+
             # Verify bucket exists
-            self._verify_bucket_exists()
-            
-            logger.info(f"S3Service initialized with bucket: {self.bucket_name}")
-            
+            try:
+                self._verify_bucket_exists()
+                logger.info(f"S3Service initialized with bucket: {self.bucket_name}")
+            except NoCredentialsError:
+                # Thiếu credentials: vô hiệu hóa S3 thay vì crash
+                logger.warning("AWS credentials not found. Disabling S3 integration for this run.")
+                self.s3_client = None
+                return
+
         except NoCredentialsError:
-            logger.error("AWS credentials not found")
-            raise
+            # Trường hợp phát sinh sớm hơn
+            logger.warning("AWS credentials not found during client init. Disabling S3 integration.")
+            self.s3_client = None
+            self.bucket_name = settings.s3_bucket_name
+            self.region = settings.aws_region
         except Exception as e:
             logger.error(f"Failed to initialize S3Service: {str(e)}")
-            raise
+            # Không crash app: vô hiệu hóa S3
+            self.s3_client = None
+            self.bucket_name = getattr(settings, 's3_bucket_name', '')
+            self.region = getattr(settings, 'aws_region', 'us-east-1')
     
     def _verify_bucket_exists(self) -> bool:
         """Verify S3 bucket exists và accessible"""
@@ -79,38 +110,16 @@ class S3Service:
         content_type: Optional[str] = None,
         metadata: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """
-        Upload file to S3 với proper organization
-        
-        Args:
-            file_content: File content as bytes
-            file_name: Original filename
-            user_id: ID của user
-            file_type: Type of file (cv, profile_image, etc.)
-            content_type: MIME type
-            metadata: Additional metadata
-            
-        Returns:
-            Dict với upload result
-        """
+        """Upload file to S3 với proper organization"""
         try:
-            # Generate unique file ID
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             file_id = str(uuid.uuid4())
             timestamp = datetime.utcnow()
             
-            # Create organized S3 key
-            s3_key = self._generate_s3_key(
-                user_id=user_id,
-                file_type=file_type,
-                file_id=file_id,
-                original_filename=file_name
-            )
+            s3_key = self._generate_s3_key(user_id, file_type, file_id, file_name)
+            content_type = content_type or self._get_content_type(file_name)
             
-            # Determine content type
-            if not content_type:
-                content_type = self._get_content_type(file_name)
-            
-            # Prepare metadata
             s3_metadata = {
                 'user_id': user_id,
                 'file_id': file_id,
@@ -123,7 +132,6 @@ class S3Service:
             if metadata:
                 s3_metadata.update(metadata)
             
-            # Upload to S3
             upload_result = self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=s3_key,
@@ -134,7 +142,6 @@ class S3Service:
                 StorageClass='STANDARD'
             )
             
-            # Generate pre-signed URL
             file_url = self._generate_presigned_url(s3_key, expiration=3600)
             
             logger.info(f"File uploaded successfully: {s3_key}")
@@ -152,10 +159,7 @@ class S3Service:
             
         except Exception as e:
             logger.error(f"Failed to upload file: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
     
     async def download_file(self, s3_key: str) -> Dict[str, Any]:
         """
@@ -168,6 +172,8 @@ class S3Service:
             Dict với download result
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             response = self.s3_client.get_object(
                 Bucket=self.bucket_name,
                 Key=s3_key
@@ -215,6 +221,8 @@ class S3Service:
             Dict với delete result
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             self.s3_client.delete_object(
                 Bucket=self.bucket_name,
                 Key=s3_key
@@ -247,10 +255,10 @@ class S3Service:
         max_files: int = 100
     ) -> Dict[str, Any]:
         """
-        List files của user trong S3
+        List files của user trong S3, hoặc tất cả files nếu user_id rỗng
         
         Args:
-            user_id: ID của user
+            user_id: ID của user (empty string để lấy tất cả files)
             file_type: Type of files to filter (optional)
             max_files: Maximum number of files to return
             
@@ -258,10 +266,20 @@ class S3Service:
             Dict với files list
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
+            
             # Create prefix for user files
-            prefix = f"user-uploads/{user_id}/"
-            if file_type:
-                prefix += f"{file_type}/"
+            if user_id:
+                prefix = f"user-uploads/{user_id}/"
+                if file_type:
+                    prefix += f"{file_type}/"
+            else:
+                # List all files if user_id is empty
+                prefix = "user-uploads/"
+                if file_type:
+                    # For all users with specific file type, we need to scan differently
+                    prefix = f"user-uploads/"
             
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
@@ -271,6 +289,12 @@ class S3Service:
             
             files = []
             for obj in response.get('Contents', []):
+                # Filter by file type if specified and user_id is empty
+                if not user_id and file_type:
+                    # Check if the file path contains the file type
+                    if f"/{file_type}/" not in obj['Key']:
+                        continue
+                
                 # Get object metadata
                 try:
                     head_response = self.s3_client.head_object(
@@ -325,6 +349,8 @@ class S3Service:
             Dict với presigned URL
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             url = self.s3_client.generate_presigned_url(
                 operation,
                 Params={'Bucket': self.bucket_name, 'Key': s3_key},
@@ -363,6 +389,8 @@ class S3Service:
             Dict với copy result
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             copy_source = {
                 'Bucket': self.bucket_name,
                 'Key': source_key
@@ -408,6 +436,8 @@ class S3Service:
             Dict với file metadata
         """
         try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             response = self.s3_client.head_object(
                 Bucket=self.bucket_name,
                 Key=s3_key

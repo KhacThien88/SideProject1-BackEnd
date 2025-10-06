@@ -9,17 +9,19 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.cv_storage import cv_storage_service
 from app.schemas.cv import (
-    CVUploadResponse, CVStatusResponse, CVAnalysisResultResponse,
+    CVUploadResponse, CVAnalysisResponse,
     CVSearchRequest, CVSearchResponse, CVUpdateRequest, CVUpdateResponse,
     CVDeleteRequest, CVDeleteResponse, CVStatsResponse, CVExportRequest, CVExportResponse
 )
 from app.utils.rate_limit import rate_limit_dependency
 
-router = APIRouter()
+router = APIRouter(tags=["CV Analysis"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/cv/{cv_id}", response_model=Dict[str, Any])
+@router.get("/cv/{cv_id}", response_model=Dict[str, Any],
+           summary="Get CV by ID",
+           description="Lấy thông tin chi tiết của CV theo ID. Chỉ chủ sở hữu mới có thể truy cập.")
 async def get_cv_by_id(
     cv_id: str,
     current_user: User = Depends(get_current_user)
@@ -198,7 +200,9 @@ async def get_analysis_result(
         )
 
 
-@router.post("/cv/search", response_model=Dict[str, Any])
+@router.post("/cv/search", response_model=Dict[str, Any],
+            summary="Search CVs",
+            description="Tìm kiếm CV theo từ khóa, kỹ năng, kinh nghiệm và các tiêu chí khác.")
 async def search_cvs(
     search_request: CVSearchRequest,
     current_user: User = Depends(get_current_user),

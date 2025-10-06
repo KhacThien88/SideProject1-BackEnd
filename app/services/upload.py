@@ -15,11 +15,13 @@ from typing import Dict, Any, List, Optional
 from fastapi import UploadFile
 import boto3
 from botocore.exceptions import ClientError
+from decimal import Decimal
 
 from app.core.config import settings
 from app.core.database import get_dynamodb_resource
 from app.utils.logger import get_logger
 from app.utils.validators import validate_file_type, validate_file_size
+from app.utils.helpers import convert_decimals
 from app.services.s3 import s3_service
 
 logger = get_logger(__name__)
@@ -126,7 +128,7 @@ class UploadService:
             Dict với rate limit result
         """
         try:
-            table = self.dynamodb.Table("upload_rate_limits")
+            table = self.dynamodb.Table(settings.rate_limit_table_name)
             
             # Kiểm tra uploads trong 1 giờ qua
             one_hour_ago = datetime.utcnow() - timedelta(hours=1)
@@ -263,7 +265,7 @@ class UploadService:
             Dict với status information
         """
         try:
-            table = self.dynamodb.Table("cv_uploads")
+            table = self.dynamodb.Table(settings.cv_uploads_table_name)
             
             response = table.get_item(
                 Key={'file_id': file_id}
@@ -277,8 +279,11 @@ class UploadService:
             
             item = response['Item']
             
+            # Convert Decimal values to int/float for JSON serialization
+            converted_item = convert_decimals(item)
+            
             # Kiểm tra ownership
-            if item['user_id'] != user_id:
+            if converted_item['user_id'] != user_id:
                 return {
                     "success": False,
                     "error": "Access denied"
@@ -286,12 +291,12 @@ class UploadService:
             
             return {
                 "success": True,
-                "file_id": item['file_id'],
-                "status": item.get('status', 'pending'),
-                "progress": item.get('progress', 0),
-                "error_message": item.get('error_message'),
-                "created_at": item['created_at'],
-                "updated_at": item['updated_at']
+                "file_id": converted_item['file_id'],
+                "status": converted_item.get('status', 'pending'),
+                "progress": converted_item.get('progress', 0),
+                "error_message": converted_item.get('error_message'),
+                "created_at": converted_item['created_at'],
+                "updated_at": converted_item['updated_at']
             }
             
         except Exception as e:
@@ -313,7 +318,7 @@ class UploadService:
             Dict với delete result
         """
         try:
-            table = self.dynamodb.Table("cv_uploads")
+            table = self.dynamodb.Table(settings.cv_uploads_table_name)
             
             # Lấy file info
             response = table.get_item(Key={'file_id': file_id})
@@ -325,8 +330,11 @@ class UploadService:
             
             item = response['Item']
             
+            # Convert Decimal values to int/float for JSON serialization
+            converted_item = convert_decimals(item)
+            
             # Kiểm tra ownership
-            if item['user_id'] != user_id:
+            if converted_item['user_id'] != user_id:
                 return {
                     "success": False,
                     "error": "Access denied"
@@ -334,7 +342,7 @@ class UploadService:
             
             # Xóa từ S3
             try:
-                await self.s3_service.delete_file(item['s3_key'])
+                await self.s3_service.delete_file(converted_item['s3_key'])
             except Exception as e:
                 logger.warning(f"Failed to delete from S3: {str(e)}")
             
@@ -366,7 +374,7 @@ class UploadService:
             Dict với files list
         """
         try:
-            table = self.dynamodb.Table("cv_uploads")
+            table = self.dynamodb.Table(settings.cv_uploads_table_name)
             
             response = table.query(
                 IndexName='user_id-created_at-index',
@@ -377,14 +385,16 @@ class UploadService:
             
             files = []
             for item in response['Items']:
+                # Convert Decimal values to int/float for JSON serialization
+                converted_item = convert_decimals(item)
                 files.append({
-                    "file_id": item['file_id'],
-                    "filename": item['filename'],
-                    "file_size": item['file_size'],
-                    "file_type": item['file_type'],
-                    "status": item.get('status', 'pending'),
-                    "created_at": item['created_at'],
-                    "updated_at": item['updated_at']
+                    "file_id": converted_item['file_id'],
+                    "filename": converted_item['filename'],
+                    "file_size": converted_item['file_size'],
+                    "file_type": converted_item['file_type'],
+                    "status": converted_item.get('status', 'pending'),
+                    "created_at": converted_item['created_at'],
+                    "updated_at": converted_item['updated_at']
                 })
             
             return {
@@ -415,7 +425,7 @@ class UploadService:
     ) -> Dict[str, Any]:
         """Save upload metadata to DynamoDB"""
         try:
-            table = self.dynamodb.Table("cv_uploads")
+            table = self.dynamodb.Table(settings.cv_uploads_table_name)
             
             item = {
                 'file_id': file_id,
@@ -451,7 +461,7 @@ class UploadService:
     ) -> None:
         """Log upload activity for rate limiting"""
         try:
-            table = self.dynamodb.Table("upload_rate_limits")
+            table = self.dynamodb.Table(settings.rate_limit_table_name)
             
             item = {
                 'id': f"{user_id}_{timestamp.isoformat()}",

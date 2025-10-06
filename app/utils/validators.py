@@ -3,10 +3,30 @@ Validation utilities cho file uploads và data validation
 """
 
 import os
-import magic
 from typing import Dict, Any, List, Optional
 from fastapi import UploadFile
 import re
+
+# Constants for validation
+MAX_EMAIL_LENGTH = 254
+MIN_PASSWORD_LENGTH = 8
+MAX_PHONE_DIGITS = 15
+MIN_PHONE_DIGITS = 7
+MAX_FILENAME_LENGTH = 255
+MAX_INPUT_LENGTH = 255
+
+# Common password blacklist
+COMMON_PASSWORDS = {
+    'password', '123456', '123456789', 'qwerty', 'abc123',
+    'password123', 'admin', 'letmein', 'welcome', 'monkey'
+}
+
+# Dangerous patterns for input validation
+DANGEROUS_PATTERNS = [
+    r'<script.*?>.*?</script>',  # Script tags
+    r'javascript:',  # JavaScript URLs
+    r'on\w+\s*=',  # Event handlers
+]
 
 
 def validate_file_type(file: UploadFile, allowed_extensions: set = None) -> Dict[str, Any]:
@@ -98,263 +118,117 @@ def validate_file_size(file: UploadFile, max_size_mb: int = 10) -> Dict[str, Any
 
 
 def validate_email(email: str) -> Dict[str, Any]:
-    """
-    Validate email format
+    """Validate email format"""
+    if not email:
+        return {"valid": False, "error": "Email is required"}
     
-    Args:
-        email: Email string to validate
-        
-    Returns:
-        Dict với validation result
-    """
-    try:
-        if not email:
-            return {
-                "valid": False,
-                "error": "Email is required"
-            }
-        
-        # Email regex pattern
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        
-        if not re.match(email_pattern, email):
-            return {
-                "valid": False,
-                "error": "Invalid email format"
-            }
-        
-        # Check length
-        if len(email) > 254:  # RFC 5321 limit
-            return {
-                "valid": False,
-                "error": "Email too long"
-            }
-        
-        return {
-            "valid": True,
-            "email": email.lower().strip()
-        }
-        
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": f"Email validation failed: {str(e)}"
-        }
+    # Email regex pattern
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    
+    if not re.match(email_pattern, email):
+        return {"valid": False, "error": "Invalid email format"}
+    
+    # Check length
+    if len(email) > MAX_EMAIL_LENGTH:
+        return {"valid": False, "error": "Email too long"}
+    
+    return {"valid": True, "email": email.lower().strip()}
 
 
 def validate_password_strength(password: str) -> Dict[str, Any]:
-    """
-    Validate password strength
+    """Validate password strength"""
+    if not password:
+        return {"valid": False, "error": "Password is required"}
     
-    Args:
-        password: Password string to validate
-        
-    Returns:
-        Dict với validation result và strength info
-    """
-    try:
-        if not password:
-            return {
-                "valid": False,
-                "error": "Password is required"
-            }
-        
-        errors = []
+    errors = []
+    strength_score = 0
+    
+    # Length check
+    if len(password) < MIN_PASSWORD_LENGTH:
+        errors.append(f"Password must be at least {MIN_PASSWORD_LENGTH} characters long")
+    else:
+        strength_score += 1
+    
+    # Character checks
+    checks = [
+        (r'[A-Z]', "uppercase letter"),
+        (r'[a-z]', "lowercase letter"), 
+        (r'\d', "number"),
+        (r'[!@#$%^&*(),.?":{}|<>]', "special character")
+    ]
+    
+    for pattern, description in checks:
+        if not re.search(pattern, password):
+            errors.append(f"Password must contain at least one {description}")
+        else:
+            strength_score += 1
+    
+    # Common password check
+    if password.lower() in COMMON_PASSWORDS:
+        errors.append("Password is too common")
         strength_score = 0
-        
-        # Length check
-        if len(password) < 8:
-            errors.append("Password must be at least 8 characters long")
-        else:
-            strength_score += 1
-        
-        # Uppercase check
-        if not re.search(r'[A-Z]', password):
-            errors.append("Password must contain at least one uppercase letter")
-        else:
-            strength_score += 1
-        
-        # Lowercase check
-        if not re.search(r'[a-z]', password):
-            errors.append("Password must contain at least one lowercase letter")
-        else:
-            strength_score += 1
-        
-        # Number check
-        if not re.search(r'\d', password):
-            errors.append("Password must contain at least one number")
-        else:
-            strength_score += 1
-        
-        # Special character check
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            errors.append("Password must contain at least one special character")
-        else:
-            strength_score += 1
-        
-        # Common password check
-        common_passwords = [
-            'password', '123456', '123456789', 'qwerty', 'abc123',
-            'password123', 'admin', 'letmein', 'welcome', 'monkey'
-        ]
-        
-        if password.lower() in common_passwords:
-            errors.append("Password is too common")
-            strength_score = 0
-        
-        # Determine strength level
-        if strength_score <= 2:
-            strength_level = "weak"
-        elif strength_score <= 3:
-            strength_level = "medium"
-        elif strength_score <= 4:
-            strength_level = "strong"
-        else:
-            strength_level = "very_strong"
-        
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "strength_score": strength_score,
-            "strength_level": strength_level
-        }
-        
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": f"Password validation failed: {str(e)}"
-        }
+    
+    # Determine strength level
+    strength_levels = ["weak", "medium", "strong", "very_strong"]
+    strength_index = min(strength_score // 2, len(strength_levels) - 1)
+    
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "strength_score": strength_score,
+        "strength_level": strength_levels[strength_index]
+    }
 
 
 def validate_phone_number(phone: str) -> Dict[str, Any]:
-    """
-    Validate phone number format
+    """Validate phone number format"""
+    if not phone:
+        return {"valid": False, "error": "Phone number is required"}
     
-    Args:
-        phone: Phone number string to validate
-        
-    Returns:
-        Dict với validation result
-    """
-    try:
-        if not phone:
-            return {
-                "valid": False,
-                "error": "Phone number is required"
-            }
-        
-        # Remove all non-digit characters
-        digits_only = re.sub(r'\D', '', phone)
-        
-        # Check if it's a valid length (7-15 digits)
-        if len(digits_only) < 7 or len(digits_only) > 15:
-            return {
-                "valid": False,
-                "error": "Phone number must be between 7 and 15 digits"
-            }
-        
-        return {
-            "valid": True,
-            "phone": digits_only,
-            "formatted": phone.strip()
-        }
-        
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": f"Phone validation failed: {str(e)}"
-        }
+    # Remove all non-digit characters
+    digits_only = re.sub(r'\D', '', phone)
+    
+    # Check if it's a valid length
+    if len(digits_only) < MIN_PHONE_DIGITS or len(digits_only) > MAX_PHONE_DIGITS:
+        return {"valid": False, "error": f"Phone number must be between {MIN_PHONE_DIGITS} and {MAX_PHONE_DIGITS} digits"}
+    
+    return {"valid": True, "phone": digits_only, "formatted": phone.strip()}
 
 
-def validate_user_input(text: str, field_name: str, max_length: int = 255) -> Dict[str, Any]:
-    """
-    Validate general user input
+def validate_user_input(text: str, field_name: str, max_length: int = MAX_INPUT_LENGTH) -> Dict[str, Any]:
+    """Validate general user input"""
+    if not text:
+        return {"valid": False, "error": f"{field_name} is required"}
     
-    Args:
-        text: Text to validate
-        field_name: Name of the field for error messages
-        max_length: Maximum allowed length
-        
-    Returns:
-        Dict với validation result
-    """
-    try:
-        if not text:
-            return {
-                "valid": False,
-                "error": f"{field_name} is required"
-            }
-        
-        # Check length
-        if len(text) > max_length:
-            return {
-                "valid": False,
-                "error": f"{field_name} is too long (max {max_length} characters)"
-            }
-        
-        # Check for potentially dangerous content
-        dangerous_patterns = [
-            r'<script.*?>.*?</script>',  # Script tags
-            r'javascript:',  # JavaScript URLs
-            r'on\w+\s*=',  # Event handlers
-        ]
-        
-        for pattern in dangerous_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return {
-                    "valid": False,
-                    "error": f"{field_name} contains potentially dangerous content"
-                }
-        
-        return {
-            "valid": True,
-            "text": text.strip()
-        }
-        
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": f"{field_name} validation failed: {str(e)}"
-        }
+    # Check length
+    if len(text) > max_length:
+        return {"valid": False, "error": f"{field_name} is too long (max {max_length} characters)"}
+    
+    # Check for potentially dangerous content
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return {"valid": False, "error": f"{field_name} contains potentially dangerous content"}
+    
+    return {"valid": True, "text": text.strip()}
 
 
 def sanitize_filename(filename: str) -> str:
-    """
-    Sanitize filename để tránh path traversal và special characters
+    """Sanitize filename để tránh path traversal và special characters"""
+    if not filename:
+        return "unnamed_file"
     
-    Args:
-        filename: Original filename
-        
-    Returns:
-        Sanitized filename
-    """
-    try:
-        if not filename:
-            return "unnamed_file"
-        
-        # Remove path components
-        filename = os.path.basename(filename)
-        
-        # Remove special characters
-        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        
-        # Remove multiple underscores
-        filename = re.sub(r'_+', '_', filename)
-        
-        # Remove leading/trailing underscores and dots
-        filename = filename.strip('_.')
-        
-        # Ensure filename is not empty
-        if not filename:
-            filename = "unnamed_file"
-        
-        # Limit length
-        if len(filename) > 255:
-            name, ext = os.path.splitext(filename)
-            filename = name[:255-len(ext)] + ext
-        
-        return filename
-        
-    except Exception as e:
-        return f"sanitized_file_{hash(filename) % 10000}"
+    # Remove path components and special characters in one step
+    filename = re.sub(r'[<>:"/\\|?*]', '_', os.path.basename(filename))
+    filename = re.sub(r'_+', '_', filename).strip('_.')
+    
+    # Ensure filename is not empty
+    if not filename:
+        filename = "unnamed_file"
+    
+    # Limit length
+    if len(filename) > MAX_FILENAME_LENGTH:
+        name, ext = os.path.splitext(filename)
+        filename = name[:MAX_FILENAME_LENGTH-len(ext)] + ext
+    
+    return filename
 

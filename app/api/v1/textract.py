@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from app.core.security import verify_token
@@ -16,7 +17,10 @@ from app.services.s3 import s3_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["Text Extraction"])
+
+# Security scheme for Swagger UI
+security = HTTPBearer()
 
 
 class TextExtractionRequest(BaseModel):
@@ -49,18 +53,10 @@ class ExtractionStatusResponse(BaseModel):
     updated_at: str
 
 
-async def get_current_user(request: Request):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     """Dependency để lấy current user từ JWT token"""
     try:
-        # Lấy token từ Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid authorization header"
-            )
-        
-        token = auth_header.split(" ")[1]
+        token = credentials.credentials
         payload = verify_token(token, "access")
         user_id = payload.get("user_id")
         
@@ -70,8 +66,14 @@ async def get_current_user(request: Request):
                 detail="Invalid token payload"
             )
         
-        return {"user_id": user_id, "email": payload.get("email")}
+        return {
+            "user_id": user_id, 
+            "email": payload.get("email"),
+            "role": payload.get("role", "candidate")
+        }
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Authentication error: {str(e)}")
         raise HTTPException(
@@ -80,9 +82,10 @@ async def get_current_user(request: Request):
         )
 
 
-@router.post("/extract", response_model=TextExtractionResponse)
+@router.post("/extract", response_model=TextExtractionResponse,
+            summary="Extract Text from S3",
+            description="Trích xuất văn bản từ CV đã upload lên S3 sử dụng AWS Textract. Hỗ trợ PDF, images và documents.")
 async def extract_text_from_cv(
-    request: Request,
     extraction_request: TextExtractionRequest,
     current_user: dict = Depends(get_current_user)
 ):
@@ -97,7 +100,8 @@ async def extract_text_from_cv(
         logger.info(f"Text extraction request for {extraction_request.s3_key} by user {current_user['user_id']}")
         
         # Verify user has access to the file
-        if not extraction_request.s3_key.startswith(f"user-uploads/{current_user['user_id']}/"):
+        # Admin can access all files, regular users can only access their own files
+        if current_user["role"] != "admin" and not extraction_request.s3_key.startswith(f"user-uploads/{current_user['user_id']}/"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this file"
@@ -155,7 +159,6 @@ async def extract_text_from_cv(
 
 @router.post("/extract-bytes", response_model=TextExtractionResponse)
 async def extract_text_from_bytes(
-    request: Request,
     file_content: bytes,
     file_name: str,
     document_type: str = "cv",
@@ -247,7 +250,9 @@ async def get_extraction_status(
         )
 
 
-@router.get("/health")
+@router.get("/health",
+           summary="Check Textract Health",
+           description="Kiểm tra trạng thái hoạt động của dịch vụ AWS Textract.")
 async def textract_health_check():
     """
     Health check cho Textract service

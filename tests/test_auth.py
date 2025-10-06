@@ -66,9 +66,9 @@ class TestAuthEndpoints:
         }
         
         response = client.post("/api/v1/auth/register", json=user_data)
-        assert response.status_code == 400
+        assert response.status_code == 422
         data = response.json()
-        assert "Passwords do not match" in data["detail"]
+        assert "Passwords do not match" in str(data["detail"])
 
     @patch('app.services.auth_service.AuthService.register_user')
     def test_register_email_exists(self, mock_register):
@@ -107,12 +107,25 @@ class TestAuthEndpoints:
         mock_authenticate.return_value = (mock_user, "Login successful")
         
         # Mock token response
-        mock_create_session.return_value = {
-            "access_token": "test-access-token",
-            "refresh_token": "test-refresh-token",
-            "token_type": "bearer",
-            "expires_in": 1800
-        }
+        from app.schemas.user import TokenResponse, UserResponse
+        mock_create_session.return_value = TokenResponse(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            token_type="bearer",
+            expires_in=1800,
+            user=UserResponse(
+                user_id="test-user-id",
+                email="test@example.com",
+                full_name="Test User",
+                phone=None,
+                role=UserRole.CANDIDATE,
+                status=UserStatus.ACTIVE,
+                email_verified=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                last_login=None
+            )
+        )
         
         login_data = {
             "email": "test@example.com",
@@ -178,12 +191,25 @@ class TestAuthEndpoints:
     def test_refresh_token_success(self, mock_refresh):
         """Test successful token refresh"""
         # Mock successful token refresh
-        mock_refresh.return_value = {
-            "access_token": "new-access-token",
-            "refresh_token": "test-refresh-token",
-            "token_type": "bearer",
-            "expires_in": 1800
-        }
+        from app.schemas.user import TokenResponse, UserResponse
+        mock_refresh.return_value = TokenResponse(
+            access_token="new-access-token",
+            refresh_token="test-refresh-token",
+            token_type="bearer",
+            expires_in=1800,
+            user=UserResponse(
+                user_id="test-user-id",
+                email="test@example.com",
+                full_name="Test User",
+                phone=None,
+                role=UserRole.CANDIDATE,
+                status=UserStatus.ACTIVE,
+                email_verified=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                last_login=None
+            )
+        )
         
         refresh_data = {
             "refresh_token": "test-refresh-token"

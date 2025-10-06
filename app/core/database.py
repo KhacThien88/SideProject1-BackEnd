@@ -2,26 +2,42 @@ import boto3
 from typing import Optional, Dict, Any, List
 from botocore.exceptions import ClientError
 from app.core.config import settings
+import os
 import json
 from datetime import datetime
 
 
 class DynamoDBClient:
     def __init__(self):
-        # Prepare boto3 configuration
+        # Cho phép vô hiệu hóa DynamoDB hoặc dùng local theo cấu hình
         boto3_config = {
             'region_name': settings.dynamodb_region,
         }
-        
-        # Add endpoint_url if specified (for local DynamoDB)
-        if settings.dynamodb_endpoint_url:
-            boto3_config['endpoint_url'] = settings.dynamodb_endpoint_url
-        
-        # Add AWS credentials if specified
+
+        # Ưu tiên endpoint local nếu bật dynamodb_use_local
+        endpoint = None
+        if getattr(settings, 'dynamodb_use_local', False):
+            endpoint = settings.dynamodb_local_endpoint or settings.dynamodb_endpoint_url
+        else:
+            endpoint = settings.dynamodb_endpoint_url
+
+        if endpoint:
+            boto3_config['endpoint_url'] = endpoint
+
+        # Thêm credentials nếu có, nếu dùng local mà không có thì set dummy
         if settings.aws_access_key_id and settings.aws_secret_access_key:
             boto3_config['aws_access_key_id'] = settings.aws_access_key_id
             boto3_config['aws_secret_access_key'] = settings.aws_secret_access_key
-        
+        elif endpoint:  # local mode
+            boto3_config['aws_access_key_id'] = os.environ.get('AWS_ACCESS_KEY_ID', 'local')
+            boto3_config['aws_secret_access_key'] = os.environ.get('AWS_SECRET_ACCESS_KEY', 'local')
+
+        # Nếu tắt hoàn toàn DynamoDB
+        if hasattr(settings, 'use_dynamodb') and not settings.use_dynamodb:
+            self.dynamodb = None
+            self.client = None
+            return
+
         self.dynamodb = boto3.resource('dynamodb', **boto3_config)
         self.client = boto3.client('dynamodb', **boto3_config)
 

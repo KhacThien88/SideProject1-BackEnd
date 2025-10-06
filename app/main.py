@@ -7,7 +7,7 @@ import logging
 import time
 
 from app.core.config import settings
-from app.api.v1 import auth, upload, textract, cv_storage
+from app.api.v1 import auth, upload, textract, cv_storage, admin, cv_admin, jobs
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 
@@ -31,11 +31,46 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    description="AI-powered resume analysis and job matching system",
+    title="🎯 CV Management & Analysis API",
+    description="Professional CV management system with AI-powered analysis",
+    version="2.1.0",
+    contact={
+        "name": "🎯 CV Management Team",
+        "email": "support@cvmanagement.com",
+        "url": "https://cvmanagement.com/support"
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    servers=[
+        {
+            "url": "http://localhost:8000",
+            "description": "🛠️ Development Server - Local testing"
+        },
+        {
+            "url": "https://api.cvmanagement.com",
+            "description": "🚀 Production Server - Live environment"
+        },
+        {
+            "url": "https://staging-api.cvmanagement.com",
+            "description": "🧪 Staging Server - Pre-production testing"
+        }
+    ],
     debug=settings.debug,
-    lifespan=lifespan
+    lifespan=lifespan,
+    openapi_tags=[
+        {"name": "Health Check"},
+        {"name": "Authentication"},
+        {"name": "File Upload"},
+        {"name": "Text Extraction"},
+        {"name": "CV Analysis"},
+        {"name": "Admin"},
+        {"name": "Admin CV Management"}
+    ],
+    openapi_url="/api/v1/openapi.json" if not settings.debug else "/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Add CORS middleware
@@ -75,33 +110,48 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Health check endpoint
-@app.get("/health")
+@app.get("/health", tags=["Health Check"])
 async def health_check():
-    """Health check endpoint"""
+    """System health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": time.time(),
+        "service": "AI Resume Analyzer & Job Match API",
         "version": settings.app_version
     }
 
 
 # Root endpoint
-@app.get("/")
+@app.get("/", tags=["Health Check"])
 async def root():
-    """Root endpoint"""
+    """Root endpoint with API information"""
     return {
-        "message": "AI Resume Analyzer & Job Match API",
+        "message": "🎯 AI Resume Analyzer & Job Match API",
         "version": settings.app_version,
+        "status": "running",
         "docs": "/docs",
-        "health": "/health"
+        "redoc": "/redoc",
+        "health": "/health",
+        "openapi": "/openapi.json",
+        "features": [
+            "🔐 JWT Authentication",
+            "📁 File Upload & Management", 
+            "📄 OCR Text Extraction",
+            "🤖 AI-Powered CV Analysis",
+            "🔍 Semantic Search",
+            "👑 Admin Management"
+        ]
     }
 
 
-# Include routers
+# Include routers theo thứ tự logic
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(upload.router, prefix="/api/v1")
 app.include_router(textract.router, prefix="/api/v1/textract")
 app.include_router(cv_storage.router, prefix="/api/v1")
+app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
+app.include_router(cv_admin.router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
