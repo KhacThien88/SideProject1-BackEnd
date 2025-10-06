@@ -1,5 +1,5 @@
 """
-API endpoints cho CV storage và management
+API endpoints for CV storage and management
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from typing import Dict, Any, List, Optional
@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 
 @router.get("/cv/{cv_id}", response_model=Dict[str, Any],
            summary="Get CV by ID",
-           description="Lấy thông tin chi tiết của CV theo ID. Chỉ chủ sở hữu mới có thể truy cập.")
+           description="Get detailed CV information by ID. Only the owner can access.")
 async def get_cv_by_id(
     cv_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Lấy CV theo ID"""
+    """Get CV by ID"""
     try:
         cv_data = await cv_storage_service.get_cv_by_id(cv_id)
         
@@ -65,7 +65,7 @@ async def get_user_cvs(
     last_key: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user)
 ):
-    """Lấy danh sách CV của user"""
+    """Get list of CVs for user"""
     try:
         # Verify user can access this data
         if user_id != current_user.user_id:
@@ -98,7 +98,7 @@ async def analyze_cv(
     cv_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Bắt đầu phân tích CV"""
+    """Start CV analysis"""
     try:
         # Get CV record
         cv_data = await cv_storage_service.get_cv_by_id(cv_id)
@@ -148,7 +148,7 @@ async def get_analysis_result(
     cv_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Lấy kết quả phân tích CV"""
+    """Get CV analysis results"""
     try:
         # Get CV record
         cv_data = await cv_storage_service.get_cv_by_id(cv_id)
@@ -202,13 +202,13 @@ async def get_analysis_result(
 
 @router.post("/cv/search", response_model=Dict[str, Any],
             summary="Search CVs",
-            description="Tìm kiếm CV theo từ khóa, kỹ năng, kinh nghiệm và các tiêu chí khác.")
+            description="Search CVs by keywords, skills, experience, and other criteria.")
 async def search_cvs(
     search_request: CVSearchRequest,
     current_user: User = Depends(get_current_user),
     rate_limit_status: bool = Depends(rate_limit_dependency)
 ):
-    """Tìm kiếm CV theo criteria"""
+    """Search CVs by criteria"""
     try:
         result = await cv_storage_service.search_cvs(
             search_request.dict(),
@@ -231,7 +231,7 @@ async def update_cv(
     update_request: CVUpdateRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Cập nhật CV metadata"""
+    """Update CV metadata"""
     try:
         result = await cv_storage_service.update_cv_metadata(
             cv_id,
@@ -254,7 +254,7 @@ async def delete_cv(
     cv_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Xóa CV"""
+    """Delete CV"""
     try:
         result = await cv_storage_service.delete_cv(cv_id, current_user.user_id)
         
@@ -292,7 +292,7 @@ async def get_cv_analytics(
     user_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    """Lấy analytics cho user"""
+    """Get analytics for user"""
     try:
         # Verify user can access this data
         if user_id != current_user.user_id:
@@ -320,7 +320,7 @@ async def get_recent_searches(
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user)
 ):
-    """Lấy recent searches của user"""
+    """Get recent searches for user"""
     try:
         result = await cv_storage_service.get_recent_searches(
             current_user.user_id, 

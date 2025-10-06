@@ -1,6 +1,6 @@
 """
 Textract API Endpoints
-Xử lý text extraction từ CV documents
+Handle text extraction from CV documents
 """
 
 import logging
@@ -25,7 +25,7 @@ security = HTTPBearer()
 
 class TextExtractionRequest(BaseModel):
     """Request model cho text extraction"""
-    s3_key: str = Field(..., description="S3 key của file cần extract")
+    s3_key: str = Field(..., description="S3 key of the file to extract")
     document_type: str = Field(default="cv", description="Type of document")
 
 
@@ -54,7 +54,7 @@ class ExtractionStatusResponse(BaseModel):
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Dependency để lấy current user từ JWT token"""
+    """Dependency to get current user from JWT token"""
     try:
         token = credentials.credentials
         payload = verify_token(token, "access")
@@ -84,15 +84,15 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @router.post("/extract", response_model=TextExtractionResponse,
             summary="Extract Text from S3",
-            description="Trích xuất văn bản từ CV đã upload lên S3 sử dụng AWS Textract. Hỗ trợ PDF, images và documents.")
+            description="Extract text from CV uploaded to S3 using AWS Textract. Supports PDF, images, and documents.")
 async def extract_text_from_cv(
     extraction_request: TextExtractionRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Extract text từ CV document trong S3
+    Extract text from CV document in S3
     
-    - **s3_key**: S3 key của file cần extract
+    - **s3_key**: S3 key of the file to extract
     - **document_type**: Type of document (cv, resume, etc.)
     - **Authentication**: Required (JWT token)
     """
@@ -165,7 +165,7 @@ async def extract_text_from_bytes(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Extract text từ file content trực tiếp
+    Extract text from file content directly
     
     - **file_content**: File content as bytes
     - **file_name**: Original filename
@@ -224,9 +224,9 @@ async def get_extraction_status(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lấy trạng thái text extraction job
+    Get text extraction job status
     
-    - **extraction_id**: ID của extraction job
+    - **extraction_id**: ID of the extraction job
     - **Authentication**: Required
     """
     try:
@@ -252,7 +252,7 @@ async def get_extraction_status(
 
 @router.get("/health",
            summary="Check Textract Health",
-           description="Kiểm tra trạng thái hoạt động của dịch vụ AWS Textract.")
+           description="Check the operational status of the AWS Textract service.")
 async def textract_health_check():
     """
     Health check cho Textract service

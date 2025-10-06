@@ -1,6 +1,6 @@
 """
 Admin API Endpoints
-Chỉ dành cho testing và development
+For testing and development only
 """
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -54,7 +54,7 @@ def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)
 
 @router.get("/users", response_model=List[UserResponse],
            summary="List All Users",
-           description="Lấy danh sách tất cả người dùng trong hệ thống. Chỉ dành cho quản trị viên.")
+           description="Get a list of all users in the system. Admin only.")
 async def list_all_users(
     request: Request,
     admin_user: User = Depends(get_admin_user)
