@@ -10,66 +10,132 @@ warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
 from s3_utils import download_from_s3, upload_to_s3, file_exists_in_s3
+from PIL import Image
+import cv2
+import time
+import logging
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
-load_dotenv()
-
-def ocr_doc(path, ocr_langs=['en']):
-    ocr_text = ''
-    reader = easyocr.Reader(ocr_langs)
-    if path.endswith('.pdf'):
-        images = convert_from_path(path)
-        ocr_result = []
-        for image in images:
-            ocr_result.extend(reader.readtext(np.array(image)))
-    else:
-        ocr_result = reader.readtext(path)
-    for res in ocr_result:
-        ocr_text += res[1] + '\n'
-    return ocr_text.strip()
-
-def extract_info_with_bedrock(raw_txt, prompt_template, model_arn, region_name='ap-southeast-2'):
-    if model_arn is None:
-        return {"error": "Model ARN is required"}
-
-    prompt = prompt_template + "\n" + raw_txt
-    client = boto3.client('bedrock-runtime', region_name=region_name)
-
-    try:
-        response = client.converse(
-            modelId=model_arn,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 2000, "temperature": 0.1, "topP": 0.9}
-        )
-        response_text = response["output"]["message"]["content"][0]["text"].strip()
-        if response_text.startswith("```json"):
-            response_text = response_text.replace("```json", "").strip()
-        if response_text.endswith("```"):
-            response_text = response_text.rstrip("```").strip()
+def measure_pipeline_time(func):
+    """Hàm decorator để đo thời gian thực hiện toàn bộ pipeline"""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
         try:
-            extracted_json = json.loads(response_text)
-        except json.JSONDecodeError:
-            extracted_json = {"error": "Failed to parse JSON", "raw_output": response_text}
-        return extracted_json
-    except Exception as e:
-        return {"error": f"Bedrock invocation failed: {str(e)}"}
+            result = func(*args, **kwargs)
+            end_time = time.time()
+            execution_time = end_time - start_time
+            minutes, seconds = divmod(execution_time, 60)
+            logger.info(f"Pipeline completed in {int(minutes)}m {seconds:.2f}s")
+            return result
+        except Exception as e:
+            end_time = time.time()
+            execution_time = end_time - start_time
+            minutes, seconds = divmod(execution_time, 60)
+            logger.error(f"Pipeline failed after {int(minutes)}m {seconds:.2f}s: {e}")
+            raise
+    return wrapper
 
+class OCRProcessor:
+    def __init__(self, ocr_langs=['en']):
+        self.reader = easyocr.Reader(ocr_langs, gpu=True)
+
+    def process(self, path):
+        ocr_text = ''
+        if path.lower().endswith('.pdf'):
+            # Giảm DPI để ảnh nhẹ hơn, xử lý nhanh hơn
+            images = convert_from_path(path, dpi=200) 
+            
+            # Hàm để xử lý một ảnh
+            def ocr_image(image):
+                results = self.reader.readtext(np.array(image), detail=0) 
+                return "\n".join(results)
+
+            # Sử dụng ThreadPoolExecutor để chạy OCR song song trên các trang
+            with ThreadPoolExecutor() as executor:
+                # Gửi tất cả các ảnh vào pool để xử lý
+                future_to_text = {executor.submit(ocr_image, img): i for i, img in enumerate(images)}
+                
+                # Thu thập kết quả theo đúng thứ tự trang
+                page_texts = ["" for _ in images]
+                for future in concurrent.futures.as_completed(future_to_text):
+                    index = future_to_text[future]
+                    try:
+                        page_texts[index] = future.result()
+                    except Exception as exc:
+                        print(f'Trang {index+1} tạo ra lỗi: {exc}')
+
+                ocr_text = "\n".join(page_texts)
+        else:
+            # Xử lý cho file ảnh đơn
+            image = Image.open(path)
+            results = self.reader.readtext(np.array(image), detail=0)
+            ocr_text = "\n".join(results)
+            
+        return ocr_text.strip()
+
+class BedrockExtractor:
+    def __init__(self, model_arn, region_name='ap-southeast-2'):
+        if not model_arn:
+            raise ValueError("Model ARN is required")
+        self.model_arn = model_arn
+        self.region_name = region_name
+        self.client = boto3.client('bedrock-runtime', region_name=region_name)
+
+    def extract(self, raw_txt, prompt_template):
+        prompt = prompt_template + "\n" + raw_txt
+        try:
+            response = self.client.converse(
+                modelId=self.model_arn,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 2000, "temperature": 0.1, "topP": 0.9}
+            )
+            response_text = response["output"]["message"]["content"][0]["text"].strip()
+            if response_text.startswith("```json"):
+                response_text = response_text.replace("```json", "").strip()
+            if response_text.endswith("```"):
+                response_text = response_text.rstrip("```").strip()
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return {"error": "Failed to parse JSON", "raw_output": response_text}
+        except Exception as e:
+            return {"error": f"Bedrock invocation failed: {str(e)}"}
+
+class S3Handler:
+    def __init__(self, bucket_name):
+        self.bucket_name = bucket_name
+
+    def download_file(self, s3_key, local_path):
+        download_from_s3(self.bucket_name, s3_key, local_path)
+
+    def upload_file(self, local_path, s3_key):
+        upload_to_s3(local_path, self.bucket_name, s3_key)
+        
+@measure_pipeline_time
 def main():
+    load_dotenv()
     # S3 bucket and file details
     bucket_name = os.getenv("S3_BUCKET_NAME")
-    input_s3_prefix = os.getenv("INPUT_S3_PREFIX") 
+    input_s3_prefix = os.getenv("INPUT_S3_PREFIX")
     output_s3_prefix = os.getenv("OUTPUT_S3_PREFIX")
     local_input_path = os.getenv("LOCAL_INPUT_DATA_DIR")
     local_output_path = os.getenv("LOCAL_OUTPUT_DATA_DIR")
+    model_arn = os.getenv("BEDROCK_MODEL_ARN")
+    region_name = os.getenv("S3_REGION")
     
     os.makedirs(local_input_path, exist_ok=True)
     os.makedirs(local_output_path, exist_ok=True)
 
-    # AWS Bedrock model details
-    model_arn = os.getenv("BEDROCK_MODEL_ARN")
-    region_name = os.getenv("S3_REGION")
+    # Initialize processors
+    ocr_processor = OCRProcessor()
+    bedrock_extractor = BedrockExtractor(model_arn, region_name)
+    s3_handler = S3Handler(bucket_name)
     
-
     # Prompt template for extraction
     cv_prompt_template = f"""
     You are an expert at extracting structured information from unstructured text.
@@ -82,9 +148,9 @@ def main():
     5. Skills (list of skills)
     6. Work Experience (list of job titles and companies)
     7. Education (list of degrees and institutions)
-    8. Certifications (list of certifications)
+    8. Certifications (list of certifications)ßß
     9. Languages (list of languages spoken)
-    10. Projects (list of notable projects with descriptions and duration)
+    10. Projects (list of notable projects with full detailed descriptions, duration and technologys used)
     11. Summary (a brief summary of the candidate)
     12. LinkedIn Profile (URL of the LinkedIn profile)
     13. GitHub Profile (URL of the GitHub profile)
@@ -164,26 +230,27 @@ def main():
     Here is the job description text:
     """
     
-    file_name = "0.png"
+    file_name = "02.pdf"
+    # Lấy tên tệp không có phần mở rộng và thay thế phần mở rộng bằng .json
+    file_base_name = os.path.splitext(file_name)[0]
+
     input_key = f"{input_s3_prefix.rstrip('/')}/{file_name}"
-    output_key = f"{output_s3_prefix.rstrip('/')}/{file_name.replace('.png', '.json')}"
-    local_input_path = os.path.join(local_input_path, file_name)
-    local_output_path = os.path.join(local_output_path, file_name.replace(".png", ".json"))
-    
+    output_key = f"{output_s3_prefix.rstrip('/')}/{file_base_name}.json"
+    local_input_file = os.path.join(local_input_path, file_name)
+    local_output_file = os.path.join(local_output_path, f"{file_base_name}.json")
 
     try:
         # Step 1: Download file from S3
-        download_from_s3(bucket_name, input_key, local_input_path)
+        s3_handler.download_file(input_key, local_input_file)
         # Step 2: Perform OCR
-        raw_text = ocr_doc(local_input_path)
+        raw_text = ocr_processor.process(local_input_file)
         # Step 3: Extract information
-        extracted_info = extract_info_with_bedrock(raw_text, cv_prompt_template, model_arn, region_name)
+        extracted_info = bedrock_extractor.extract(raw_text, cv_prompt_template)
         # Step 4: Save extracted information to a JSON file
-        with open(local_output_path, 'w') as json_file:
+        with open(local_output_file, 'w') as json_file:
             json.dump(extracted_info, json_file, indent=4)
         # Step 5: Upload JSON file to S3
-        upload_to_s3(local_output_path, bucket_name, output_key)
-
+        s3_handler.upload_file(local_output_file, output_key)
     except Exception as e:
         print(f"Error in processing: {e}")
 
