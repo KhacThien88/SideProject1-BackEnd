@@ -184,7 +184,7 @@ class UploadService:
             Dict với upload result
         """
         try:
-            # Tạo unique file ID
+            # Tạo unique file ID (sử dụng chung cho S3 metadata và DynamoDB)
             file_id = str(uuid.uuid4())
             timestamp = datetime.utcnow()
             
@@ -198,7 +198,8 @@ class UploadService:
                 file_name=file.filename,
                 user_id=user_id,
                 file_type="cv",
-                content_type=file.content_type
+                content_type=file.content_type,
+                file_id=file_id
             )
             
             if not s3_result["success"]:

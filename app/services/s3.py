@@ -108,13 +108,14 @@ class S3Service:
         user_id: str,
         file_type: str = "cv",
         content_type: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Upload file to S3 với proper organization"""
         try:
             if not self.s3_client:
                 return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
-            file_id = str(uuid.uuid4())
+            file_id = file_id or str(uuid.uuid4())
             timestamp = datetime.utcnow()
             
             s3_key = self._generate_s3_key(user_id, file_type, file_id, file_name)
@@ -159,6 +160,40 @@ class S3Service:
             
         except Exception as e:
             logger.error(f"Failed to upload file: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def find_s3_key_by_file_id(self, file_id: str, max_scan: int = 2000) -> Dict[str, Any]:
+        """
+        Tìm object key trong S3 theo metadata file_id (fallback khi DB thiếu bản ghi)
+        Cảnh báo: thao tác này quét theo prefix chung và head_object để đối chiếu metadata.
+        """
+        try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
+
+            prefix = "user-uploads/"
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, PaginationConfig={"MaxItems": max_scan})
+
+            for page in pages:
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    try:
+                        head = self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
+                        md = head.get('Metadata', {})
+                        if md.get('file_id') == file_id:
+                            return {
+                                "success": True,
+                                "s3_key": key,
+                                "metadata": md,
+                                "content_type": head.get('ContentType')
+                            }
+                    except Exception:
+                        continue
+
+            return {"success": False, "error": "File not found"}
+        except Exception as e:
+            logger.error(f"Failed to find s3 key by file_id {file_id}: {str(e)}")
             return {"success": False, "error": str(e)}
     
     async def download_file(self, s3_key: str) -> Dict[str, Any]:

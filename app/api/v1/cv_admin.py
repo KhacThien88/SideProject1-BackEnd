@@ -167,15 +167,26 @@ async def download_cv_file_admin(
         table = dynamodb.Table(settings.cv_uploads_table_name)
         
         response = table.get_item(Key={'file_id': file_id})
-        if 'Item' not in response:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
-            )
-        
-        file_info = response['Item']
-        s3_key = file_info['s3_key']
-        filename = file_info['filename']
+        if 'Item' in response:
+            file_info = response['Item']
+            s3_key = file_info['s3_key']
+            filename = file_info.get('filename') or file_info.get('original_filename') or f"{file_id}.bin"
+        else:
+            # Fallback: tìm trực tiếp trên S3 theo metadata file_id
+            fallback = await s3_service.find_s3_key_by_file_id(file_id)
+            if not fallback.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found"
+                )
+            s3_key = fallback['s3_key']
+            # Lấy tên file từ key phần sau dấu '_' nếu có
+            try:
+                filename = s3_key.split('/')[-1]
+                if '_' in filename:
+                    filename = filename.split('_', 1)[1]
+            except Exception:
+                filename = f"{file_id}.bin"
         
         # Download from S3
         download_result = await s3_service.download_file(s3_key)
@@ -224,14 +235,18 @@ async def extract_text_from_cv_admin(
         table = dynamodb.Table(settings.cv_uploads_table_name)
         
         response = table.get_item(Key={'file_id': file_id})
-        if 'Item' not in response:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
-            )
-        
-        file_info = response['Item']
-        s3_key = file_info['s3_key']
+        if 'Item' in response:
+            file_info = response['Item']
+            s3_key = file_info['s3_key']
+        else:
+            # Fallback tìm trực tiếp trên S3 theo metadata file_id
+            fallback = await s3_service.find_s3_key_by_file_id(file_id)
+            if not fallback.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found"
+                )
+            s3_key = fallback['s3_key']
         
         # Extract text using Textract
         extraction_result = await textract_service.extract_text_from_s3(
@@ -288,16 +303,28 @@ async def delete_cv_file_admin(
         table = dynamodb.Table(settings.cv_uploads_table_name)
         
         response = table.get_item(Key={'file_id': file_id})
-        if 'Item' not in response:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found"
-            )
-        
-        file_info = response['Item']
-        s3_key = file_info['s3_key']
-        filename = file_info['filename']
-        file_user_id = file_info['user_id']
+        if 'Item' in response:
+            file_info = response['Item']
+            s3_key = file_info['s3_key']
+            filename = file_info.get('filename') or file_info.get('original_filename') or f"{file_id}.bin"
+            file_user_id = file_info['user_id']
+        else:
+            # Fallback: tìm trên S3 theo metadata file_id
+            fallback = await s3_service.find_s3_key_by_file_id(file_id)
+            if not fallback.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found"
+                )
+            s3_key = fallback['s3_key']
+            # Suy ra filename từ key
+            try:
+                filename = s3_key.split('/')[-1]
+                if '_' in filename:
+                    filename = filename.split('_', 1)[1]
+            except Exception:
+                filename = f"{file_id}.bin"
+            file_user_id = fallback.get('metadata', {}).get('user_id', 'Unknown')
         
         # Delete from S3
         try:
@@ -305,8 +332,11 @@ async def delete_cv_file_admin(
         except Exception as e:
             logger.warning(f"Failed to delete from S3: {str(e)}")
         
-        # Delete from database
-        table.delete_item(Key={'file_id': file_id})
+        # Delete from database (nếu có)
+        try:
+            table.delete_item(Key={'file_id': file_id})
+        except Exception:
+            pass
         
         logger.info(f"File {file_id} ({filename}) deleted by admin {admin_user['user_id']}")
         
