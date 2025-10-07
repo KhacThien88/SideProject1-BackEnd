@@ -35,12 +35,13 @@ class UploadService:
         self.s3_service = s3_service
         
         # File validation settings
-        self.allowed_extensions = {'.pdf', '.doc', '.docx'}
+        self.allowed_extensions = {'.pdf', '.jpg', '.jpeg', '.png'}
         self.max_file_size = 10 * 1024 * 1024  # 10MB
         self.allowed_mime_types = {
             'application/pdf',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            'image/jpeg',
+            'image/jpg', 
+            'image/png'
         }
     
     async def validate_upload_file(self, file: UploadFile) -> Dict[str, Any]:

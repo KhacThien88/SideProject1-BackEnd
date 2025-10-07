@@ -78,7 +78,7 @@ async def get_current_user(request: Request):
 
 @router.post("/cv", response_model=UploadResponse,
             summary="Upload CV",
-            description="Upload CV file (PDF, DOC, DOCX, JPG, PNG). Automatically validates file type and size.")
+            description="Upload CV file (PDF, JPG, JPEG, PNG). Automatically validates file type and size.")
 async def upload_cv(
     request: Request,
     file: UploadFile = File(...),
@@ -87,7 +87,7 @@ async def upload_cv(
     """
     Upload CV file with validation and security
     
-    - **file**: CV file (PDF, DOC, DOCX) - max 10MB
+    - **file**: CV file (PDF, JPG, JPEG, PNG) - max 10MB
     - **Authentication**: Required (JWT token)
     - **Rate limiting**: Applied
     """

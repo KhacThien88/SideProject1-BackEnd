@@ -73,15 +73,9 @@ class TextractService:
         try:
             logger.info(f"Starting text extraction for {s3_key}")
             
-            # Detect document type và choose appropriate method
-            file_extension = s3_key.lower().split('.')[-1]
-            
-            if file_extension == 'pdf':
-                # Use synchronous API for PDFs
-                result = await self._extract_text_sync(s3_key)
-            else:
-                # Use asynchronous API for other formats
-                result = await self._extract_text_async(s3_key)
+            # Use asynchronous API for all document types
+            # Some PDF formats are not supported by sync API but work with async API
+            result = await self._extract_text_async(s3_key)
             
             if result["success"]:
                 # Process extracted text
@@ -210,11 +204,30 @@ class TextractService:
                     "error": "Access denied to S3 object"
                 }
             else:
-                logger.error(f"Textract sync error: {str(e)}")
-                return {
-                    "success": False,
-                    "error": f"Textract error: {str(e)}"
-                }
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                error_message = str(e)
+                
+                if error_code == 'UnsupportedDocumentException':
+                    logger.error(f"Unsupported document format: {error_message}")
+                    return {
+                        "success": False,
+                        "error": "Document format not supported by Textract. Please ensure the file is a valid PDF or image.",
+                        "error_code": error_code
+                    }
+                elif error_code == 'InvalidS3ObjectException':
+                    logger.error(f"S3 object not accessible: {error_message}")
+                    return {
+                        "success": False,
+                        "error": "Cannot access file in S3. Check file permissions and region settings.",
+                        "error_code": error_code
+                    }
+                else:
+                    logger.error(f"Textract sync error: {error_message}")
+                    return {
+                        "success": False,
+                        "error": f"Textract processing failed: {error_message}",
+                        "error_code": error_code
+                    }
         except Exception as e:
             logger.error(f"Sync extraction error: {str(e)}")
             return {
@@ -238,9 +251,40 @@ class TextractService:
             job_id = response['JobId']
             logger.info(f"Started async text extraction job: {job_id}")
             
-            # Wait for job completion
-            waiter = self.textract_client.get_waiter('text_detection_job_complete')
-            waiter.wait(JobId=job_id)
+            # Wait for job completion using polling
+            import time
+            max_wait_time = 300  # 5 minutes
+            wait_interval = 5    # 5 seconds
+            elapsed_time = 0
+            
+            while elapsed_time < max_wait_time:
+                try:
+                    status_response = self.textract_client.get_document_text_detection(JobId=job_id)
+                    job_status = status_response.get('JobStatus', 'UNKNOWN')
+                    
+                    if job_status == 'SUCCEEDED':
+                        result_response = status_response
+                        break
+                    elif job_status == 'FAILED':
+                        error_message = status_response.get('StatusMessage', 'Job failed')
+                        raise Exception(f"Textract job failed: {error_message}")
+                    elif job_status in ['IN_PROGRESS', 'SUBMITTED']:
+                        logger.info(f"Job {job_id} status: {job_status}, waiting...")
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    else:
+                        raise Exception(f"Unknown job status: {job_status}")
+                        
+                except ClientError as e:
+                    if e.response.get('Error', {}).get('Code') == 'InvalidJobIdException':
+                        # Job not ready yet, continue waiting
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    else:
+                        raise
+            
+            if elapsed_time >= max_wait_time:
+                raise Exception("Textract job timed out")
             
             # Get results
             result_response = self.textract_client.get_document_text_detection(JobId=job_id)
