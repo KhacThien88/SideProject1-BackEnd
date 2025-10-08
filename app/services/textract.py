@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError, WaiterError
 from botocore.config import Config
 
 from app.core.config import settings
+from app.core.database import get_dynamodb_resource
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,7 +59,8 @@ class TextractService:
     async def extract_text_from_s3(
         self, 
         s3_key: str, 
-        document_type: str = "cv"
+        document_type: str = "cv",
+        force: bool = False
     ) -> Dict[str, Any]:
         """
         Extract text từ document trong S3
@@ -72,20 +74,121 @@ class TextractService:
         """
         try:
             logger.info(f"Starting text extraction for {s3_key}")
-            
+
+            # Try reuse from S3 + DynamoDB if not forced
+            source_user_id: Optional[str] = None
+            source_file_id: Optional[str] = None
+            source_etag: Optional[str] = None
+            source_last_modified: Optional[str] = None
+
+            try:
+                head = self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
+                md = head.get('Metadata', {})
+                source_user_id = md.get('user_id')
+                source_file_id = md.get('file_id')
+                source_etag = head.get('ETag', '').strip('"')
+                lm = head.get('LastModified')
+                source_last_modified = lm.isoformat() if lm else None
+            except Exception:
+                # If we can't head the object, proceed with extraction attempt (will fail later accordingly)
+                pass
+
+            # Determine potential extract key path
+            extract_key: Optional[str] = None
+            if source_user_id and source_file_id:
+                extract_folder = "Textract/CV_extract" if document_type == "cv" else "Textract/JD_extract"
+                extract_key = f"{extract_folder}/{source_user_id}/{source_file_id}.txt"
+
+            if not force and extract_key:
+                # Optional DynamoDB validation with stored etag
+                etag_matches = True
+                try:
+                    dynamodb = get_dynamodb_resource()
+                    if dynamodb:
+                        table = dynamodb.Table(settings.cv_uploads_table_name)
+                        item_resp = table.get_item(Key={'file_id': source_file_id})
+                        item = item_resp.get('Item')
+                        if item and item.get('source_etag') and source_etag:
+                            etag_matches = (item.get('source_etag') == source_etag)
+                except Exception:
+                    # If dynamodb check fails, fallback to relying on S3 presence
+                    etag_matches = True
+
+                # If we consider cache valid, try to load cached extract from S3
+                if etag_matches:
+                    try:
+                        cached_obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=extract_key)
+                        cached_text_bytes = cached_obj['Body'].read()
+                        cached_text = cached_text_bytes.decode('utf-8', errors='ignore')
+                        processed_text = await self._process_extracted_text(cached_text, document_type)
+                        return {
+                            "success": True,
+                            "text": processed_text["processed_text"],
+                            "raw_text": cached_text,
+                            "confidence": 0.0,
+                            "document_type": document_type,
+                            "extraction_method": "cache",
+                            "processing_metadata": processed_text["metadata"],
+                            "extraction_timestamp": datetime.utcnow().isoformat()
+                        }
+                    except ClientError as e:
+                        if e.response['Error']['Code'] != 'NoSuchKey':
+                            logger.warning(f"Failed to reuse cached extract {extract_key}: {str(e)}")
+                        # else: no cache, proceed to extract
+
             # Use asynchronous API for all document types
             # Some PDF formats are not supported by sync API but work with async API
             result = await self._extract_text_async(s3_key)
-            
+
             if result["success"]:
                 # Process extracted text
                 processed_text = await self._process_extracted_text(
                     result["text"], 
                     document_type
                 )
-                
+
+                # Persist extract to S3 for future reuse if we have identifiers
+                if extract_key:
+                    try:
+                        content_bytes = processed_text["processed_text"].encode("utf-8")
+                        self.s3_client.put_object(
+                            Bucket=self.bucket_name,
+                            Key=extract_key,
+                            Body=content_bytes,
+                            ContentType="text/plain; charset=utf-8",
+                            Metadata={
+                                "user_id": source_user_id or "",
+                                "file_id": source_file_id or "",
+                                "source_key": s3_key,
+                                "document_type": document_type,
+                                "original_etag": source_etag or ""
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to persist Textract output to {extract_key}: {str(e)}")
+
+                # Update DynamoDB mapping for future reuse
+                try:
+                    dynamodb = get_dynamodb_resource()
+                    if dynamodb and source_file_id:
+                        table = dynamodb.Table(settings.cv_uploads_table_name)
+                        update_expr = "SET source_etag = :etag, source_last_modified = :lm, extract_key = :ek, last_extracted_at = :ts, document_type = :dt"
+                        table.update_item(
+                            Key={'file_id': source_file_id},
+                            UpdateExpression=update_expr,
+                            ExpressionAttributeValues={
+                                ':etag': source_etag or '',
+                                ':lm': source_last_modified or '',
+                                ':ek': extract_key or '',
+                                ':ts': datetime.utcnow().isoformat(),
+                                ':dt': document_type
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to update DynamoDB mapping for {source_file_id}: {str(e)}")
+
                 logger.info(f"Text extraction completed for {s3_key}")
-                
+
                 return {
                     "success": True,
                     "text": processed_text["processed_text"],
@@ -98,7 +201,7 @@ class TextractService:
                 }
             else:
                 return result
-                
+
         except Exception as e:
             logger.error(f"Text extraction failed for {s3_key}: {str(e)}")
             return {

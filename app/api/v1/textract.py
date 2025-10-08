@@ -27,6 +27,7 @@ class TextExtractionRequest(BaseModel):
     """Request model cho text extraction"""
     s3_key: str = Field(..., description="S3 key of the file to extract")
     document_type: str = Field(default="cv", description="Type of document")
+    force: bool = Field(default=False, description="Force re-extraction even if cached result exists")
 
 
 class TextExtractionResponse(BaseModel):
@@ -120,7 +121,8 @@ async def extract_text_from_cv(
         
         extraction_result = await textract_service.extract_text_from_s3(
             s3_key=extraction_request.s3_key,
-            document_type=extraction_request.document_type
+            document_type=extraction_request.document_type,
+            force=extraction_request.force
         )
         
         processing_time = (datetime.utcnow() - start_time).total_seconds()
