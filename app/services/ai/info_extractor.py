@@ -16,6 +16,7 @@ import time
 import logging
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+import io
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,22 +43,34 @@ def measure_pipeline_time(func):
     return wrapper
 
 class OCRProcessor:
-    def __init__(self, ocr_langs=['en']):
-        self.reader = easyocr.Reader(ocr_langs, gpu=True)
+    def __init__(self, region_name='ap-southeast-2'):
+        self.client = boto3.client('textract', region_name=region_name)
 
     def process(self, path):
         ocr_text = ''
         if path.lower().endswith('.pdf'):
             # Giảm DPI để ảnh nhẹ hơn, xử lý nhanh hơn
-            images = convert_from_path(path, dpi=200) 
+            images = convert_from_path(path, dpi=200)
             
-            # Hàm để xử lý một ảnh
+            # Hàm để xử lý một ảnh với Textract
             def ocr_image(image):
-                results = self.reader.readtext(np.array(image), detail=0) 
-                return "\n".join(results)
+                # Chuyển PIL.Image sang bytes
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                response = self.client.detect_document_text(
+                    Document={'Bytes': img_byte_arr}
+                )
+                
+                text = ''
+                for item in response['Blocks']:
+                    if item['BlockType'] == 'LINE':
+                        text += item['Text'] + '\n'
+                return text.strip()
 
             # Sử dụng ThreadPoolExecutor để chạy OCR song song trên các trang
-            with ThreadPoolExecutor() as executor:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 # Gửi tất cả các ảnh vào pool để xử lý
                 future_to_text = {executor.submit(ocr_image, img): i for i, img in enumerate(images)}
                 
@@ -73,9 +86,16 @@ class OCRProcessor:
                 ocr_text = "\n".join(page_texts)
         else:
             # Xử lý cho file ảnh đơn
-            image = Image.open(path)
-            results = self.reader.readtext(np.array(image), detail=0)
-            ocr_text = "\n".join(results)
+            with open(path, 'rb') as image_file:
+                img_byte_arr = image_file.read()
+                
+            response = self.client.detect_document_text(
+                Document={'Bytes': img_byte_arr}
+            )
+            
+            for item in response['Blocks']:
+                if item['BlockType'] == 'LINE':
+                    ocr_text += item['Text'] + '\n'
             
         return ocr_text.strip()
 
@@ -119,7 +139,7 @@ class S3Handler:
 @measure_pipeline_time
 def main():
     load_dotenv()
-    # S3 bucket and file details
+    
     bucket_name = os.getenv("S3_BUCKET_NAME")
     input_s3_prefix = os.getenv("INPUT_S3_PREFIX")
     output_s3_prefix = os.getenv("OUTPUT_S3_PREFIX")
@@ -128,15 +148,22 @@ def main():
     model_arn = os.getenv("BEDROCK_MODEL_ARN")
     region_name = os.getenv("S3_REGION")
     
+    print(f"Using model ARN: {model_arn}")
+    print(f"Using S3 bucket: {bucket_name} in region: {region_name}")
+    print(f"Input S3 prefix: {input_s3_prefix}")
+    print(f"Output S3 prefix: {output_s3_prefix}")
+    print(f"Local input path: {local_input_path}")
+    print(f"Local output path: {local_output_path}")
+        
     os.makedirs(local_input_path, exist_ok=True)
     os.makedirs(local_output_path, exist_ok=True)
 
-    # Initialize processors
+    # Khởi tạo OCR
     ocr_processor = OCRProcessor()
     bedrock_extractor = BedrockExtractor(model_arn, region_name)
     s3_handler = S3Handler(bucket_name)
     
-    # Prompt template for extraction
+    # Prompt templates
     cv_prompt_template = f"""
     You are an expert at extracting structured information from unstructured text.
     Do not make up any information.
@@ -230,8 +257,7 @@ def main():
     Here is the job description text:
     """
     
-    file_name = "02.pdf"
-    # Lấy tên tệp không có phần mở rộng và thay thế phần mở rộng bằng .json
+    file_name = "2aa9c768-7e13-432c-a33f-8476964e7965_CV_Huan_Developer.pdf"
     file_base_name = os.path.splitext(file_name)[0]
 
     input_key = f"{input_s3_prefix.rstrip('/')}/{file_name}"
@@ -244,8 +270,13 @@ def main():
         s3_handler.download_file(input_key, local_input_file)
         # Step 2: Perform OCR
         raw_text = ocr_processor.process(local_input_file)
+        # Change the prompt template based on the type of document (CV or Job Description)
+        if "cv" in file_base_name.lower() or "resume" in file_base_name.lower():
+            prompt_template = cv_prompt_template
+        else:
+            prompt_template = job_prompt_template
         # Step 3: Extract information
-        extracted_info = bedrock_extractor.extract(raw_text, cv_prompt_template)
+        extracted_info = bedrock_extractor.extract(raw_text, prompt_template)
         # Step 4: Save extracted information to a JSON file
         with open(local_output_file, 'w') as json_file:
             json.dump(extracted_info, json_file, indent=4)
