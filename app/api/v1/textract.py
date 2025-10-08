@@ -101,7 +101,7 @@ async def extract_text_from_cv(
         
         # Verify user has access to the file
         # Admin can access all files, regular users can only access their own files
-        if current_user["role"] != "admin" and not extraction_request.s3_key.startswith(f"user-uploads/{current_user['user_id']}/"):
+        if current_user["role"] != "admin" and not extraction_request.s3_key.startswith(f"User_Upload/CV_raw/{current_user['user_id']}/"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this file"
