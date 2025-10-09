@@ -108,13 +108,14 @@ class S3Service:
         user_id: str,
         file_type: str = "cv",
         content_type: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Upload file to S3 với proper organization"""
         try:
             if not self.s3_client:
                 return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
-            file_id = str(uuid.uuid4())
+            file_id = file_id or str(uuid.uuid4())
             timestamp = datetime.utcnow()
             
             s3_key = self._generate_s3_key(user_id, file_type, file_id, file_name)
@@ -159,6 +160,40 @@ class S3Service:
             
         except Exception as e:
             logger.error(f"Failed to upload file: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def find_s3_key_by_file_id(self, file_id: str, max_scan: int = 2000) -> Dict[str, Any]:
+        """
+        Tìm object key trong S3 theo metadata file_id (fallback khi DB thiếu bản ghi)
+        Cảnh báo: thao tác này quét theo prefix chung và head_object để đối chiếu metadata.
+        """
+        try:
+            if not self.s3_client:
+                return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
+
+            prefix = "User_Upload/"
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, PaginationConfig={"MaxItems": max_scan})
+
+            for page in pages:
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    try:
+                        head = self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
+                        md = head.get('Metadata', {})
+                        if md.get('file_id') == file_id:
+                            return {
+                                "success": True,
+                                "s3_key": key,
+                                "metadata": md,
+                                "content_type": head.get('ContentType')
+                            }
+                    except Exception:
+                        continue
+
+            return {"success": False, "error": "File not found"}
+        except Exception as e:
+            logger.error(f"Failed to find s3 key by file_id {file_id}: {str(e)}")
             return {"success": False, "error": str(e)}
     
     async def download_file(self, s3_key: str) -> Dict[str, Any]:
@@ -269,17 +304,19 @@ class S3Service:
             if not self.s3_client:
                 return {"success": False, "error": "S3 is disabled (no AWS credentials)."}
             
-            # Create prefix for user files
+            # Create prefix for user files (new structure)
+            # User_Upload/{CV_raw|JD_raw}/{user_id}/
             if user_id:
-                prefix = f"user-uploads/{user_id}/"
-                if file_type:
-                    prefix += f"{file_type}/"
+                if file_type == 'cv':
+                    prefix = f"User_Upload/CV_raw/{user_id}/"
+                elif file_type == 'jd':
+                    prefix = f"User_Upload/JD_raw/{user_id}/"
+                else:
+                    # default to all raw uploads for user
+                    prefix = f"User_Upload/"
             else:
-                # List all files if user_id is empty
-                prefix = "user-uploads/"
-                if file_type:
-                    # For all users with specific file type, we need to scan differently
-                    prefix = f"user-uploads/"
+                # List all
+                prefix = "User_Upload/"
             
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
@@ -291,8 +328,9 @@ class S3Service:
             for obj in response.get('Contents', []):
                 # Filter by file type if specified and user_id is empty
                 if not user_id and file_type:
-                    # Check if the file path contains the file type
-                    if f"/{file_type}/" not in obj['Key']:
+                    if file_type == 'cv' and '/CV_raw/' not in obj['Key']:
+                        continue
+                    if file_type == 'jd' and '/JD_raw/' not in obj['Key']:
                         continue
                 
                 # Get object metadata
@@ -479,13 +517,20 @@ class S3Service:
         file_id: str, 
         original_filename: str
     ) -> str:
-        """Generate organized S3 key"""
-        # Sanitize filename
+        """Generate organized S3 key theo cấu trúc mới:
+        - Raw uploads: User_Upload/{CV_raw|JD_raw}/{user_id}/{file_id}_{filename}
+        - Textract outputs (handled outside): Textract/{CV_extract|JD_extract}/...
+        - Processed outputs (handled outside): Processed/{CV_Json|JD_Json}/...
+        """
         safe_filename = self._sanitize_filename(original_filename)
-        
-        # Create organized path: user-uploads/{user_id}/{file_type}/{file_id}_{filename}
-        s3_key = f"user-uploads/{user_id}/{file_type}/{file_id}_{safe_filename}"
-        
+        if file_type.lower() in ["cv", "resume", "cv_raw"]:
+            prefix = "User_Upload/CV_raw"
+        elif file_type.lower() in ["jd", "job", "jd_raw"]:
+            prefix = "User_Upload/JD_raw"
+        else:
+            # default to raw CV path if unspecified
+            prefix = "User_Upload/CV_raw"
+        s3_key = f"{prefix}/{user_id}/{file_id}_{safe_filename}"
         return s3_key
     
     def _sanitize_filename(self, filename: str) -> str:
@@ -555,7 +600,7 @@ class S3Service:
                         'ID': 'CV_Uploads_Lifecycle',
                         'Status': 'Enabled',
                         'Filter': {
-                            'Prefix': 'user-uploads/'
+                            'Prefix': 'User_Upload/'
                         },
                         'Transitions': [
                             {

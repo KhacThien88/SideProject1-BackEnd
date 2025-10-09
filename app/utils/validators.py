@@ -35,13 +35,13 @@ def validate_file_type(file: UploadFile, allowed_extensions: set = None) -> Dict
     
     Args:
         file: UploadFile object
-        allowed_extensions: Set of allowed extensions (default: {'.pdf', '.doc', '.docx'})
+        allowed_extensions: Set of allowed extensions (default: {'.pdf', '.jpg', '.jpeg', '.png'})
         
     Returns:
         Dict với validation result
     """
     if allowed_extensions is None:
-        allowed_extensions = {'.pdf', '.doc', '.docx'}
+        allowed_extensions = {'.pdf', '.jpg', '.jpeg', '.png'}
     
     try:
         if not file.filename:

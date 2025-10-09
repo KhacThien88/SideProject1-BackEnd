@@ -35,12 +35,13 @@ class UploadService:
         self.s3_service = s3_service
         
         # File validation settings
-        self.allowed_extensions = {'.pdf', '.doc', '.docx'}
+        self.allowed_extensions = {'.pdf', '.jpg', '.jpeg', '.png'}
         self.max_file_size = 10 * 1024 * 1024  # 10MB
         self.allowed_mime_types = {
             'application/pdf',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            'image/jpeg',
+            'image/jpg', 
+            'image/png'
         }
     
     async def validate_upload_file(self, file: UploadFile) -> Dict[str, Any]:
@@ -165,14 +166,14 @@ class UploadService:
             # Trong trường hợp lỗi, cho phép upload
             return {"allowed": True, "error": str(e)}
     
-    async def process_cv_upload(
+    async def process_jd_upload(
         self, 
         file: UploadFile, 
         user_id: str, 
         user_email: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Process CV upload với storage và database
+        Process JD upload với storage và database
         
         Args:
             file: UploadFile object
@@ -183,7 +184,7 @@ class UploadService:
             Dict với upload result
         """
         try:
-            # Tạo unique file ID
+            # Tạo unique file ID (sử dụng chung cho S3 metadata và DynamoDB)
             file_id = str(uuid.uuid4())
             timestamp = datetime.utcnow()
             
@@ -191,13 +192,14 @@ class UploadService:
             file_content = await file.read()
             file_size = len(file_content)
             
-            # Upload to S3 using S3Service
+            # Upload to S3 using S3Service (lưu vào User_Upload/JD_raw/...)
             s3_result = await self.s3_service.upload_file(
                 file_content=file_content,
                 file_name=file.filename,
                 user_id=user_id,
-                file_type="cv",
-                content_type=file.content_type
+                file_type="jd",  # mapped to User_Upload/JD_raw
+                content_type=file.content_type,
+                file_id=file_id
             )
             
             if not s3_result["success"]:
@@ -234,6 +236,125 @@ class UploadService:
             # Log rate limiting
             await self._log_upload_activity(user_id, file_id, timestamp)
             
+            # Trigger Textract asynchronously để tạo Textract/JD_extract
+            try:
+                from app.services.textract import textract_service
+                # Fire-and-forget: không chặn request chính
+                import asyncio
+                asyncio.create_task(self._trigger_textract_after_raw_upload(
+                    s3_key=s3_result["s3_key"],
+                    document_type="jd",
+                    user_id=user_id,
+                    file_id=file_id,
+                    original_filename=file.filename
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to trigger Textract post-upload: {str(e)}")
+            
+            logger.info(f"JD upload successful: {file_id} for user {user_id}")
+            
+            return {
+                "success": True,
+                "file_id": file_id,
+                "file_url": s3_result["file_url"],
+                "file_size": file_size,
+                "file_type": os.path.splitext(file.filename)[1],
+                "upload_timestamp": timestamp.isoformat(),
+                "s3_key": s3_result["s3_key"]
+            }
+            
+        except Exception as e:
+            logger.error(f"JD upload processing error: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Upload processing failed: {str(e)}"
+            }
+
+    async def process_cv_upload(
+        self, 
+        file: UploadFile, 
+        user_id: str, 
+        user_email: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Process CV upload với storage và database
+        
+        Args:
+            file: UploadFile object
+            user_id: ID của user
+            user_email: Email của user (optional)
+            
+        Returns:
+            Dict với upload result
+        """
+        try:
+            # Tạo unique file ID (sử dụng chung cho S3 metadata và DynamoDB)
+            file_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow()
+            
+            # Đọc file content
+            file_content = await file.read()
+            file_size = len(file_content)
+            
+            # Upload to S3 using S3Service (lưu vào User_Upload/CV_raw/...)
+            s3_result = await self.s3_service.upload_file(
+                file_content=file_content,
+                file_name=file.filename,
+                user_id=user_id,
+                file_type="cv",  # mapped to User_Upload/CV_raw
+                content_type=file.content_type,
+                file_id=file_id
+            )
+            
+            if not s3_result["success"]:
+                return {
+                    "success": False,
+                    "error": f"S3 upload failed: {s3_result['error']}"
+                }
+            
+            # Lưu metadata vào DynamoDB
+            db_result = await self._save_upload_metadata(
+                file_id=file_id,
+                user_id=user_id,
+                user_email=user_email,
+                filename=file.filename,
+                file_size=file_size,
+                file_type=os.path.splitext(file.filename)[1],
+                s3_key=s3_result["s3_key"],
+                s3_url=s3_result["file_url"],
+                upload_timestamp=timestamp
+            )
+            
+            if not db_result["success"]:
+                # Rollback: xóa file khỏi S3
+                try:
+                    await self.s3_service.delete_file(s3_result["s3_key"])
+                except Exception as e:
+                    logger.error(f"Failed to rollback S3 upload: {str(e)}")
+                
+                return {
+                    "success": False,
+                    "error": f"Database save failed: {db_result['error']}"
+                }
+            
+            # Log rate limiting
+            await self._log_upload_activity(user_id, file_id, timestamp)
+            
+            # Trigger Textract asynchronously để tạo Textract/CV_extract
+            try:
+                from app.services.textract import textract_service
+                # Fire-and-forget: không chặn request chính
+                import asyncio
+                asyncio.create_task(self._trigger_textract_after_raw_upload(
+                    s3_key=s3_result["s3_key"],
+                    document_type="cv",
+                    user_id=user_id,
+                    file_id=file_id,
+                    original_filename=file.filename
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to trigger Textract post-upload: {str(e)}")
+            
             logger.info(f"CV upload successful: {file_id} for user {user_id}")
             
             return {
@@ -252,6 +373,47 @@ class UploadService:
                 "success": False,
                 "error": f"Upload processing failed: {str(e)}"
             }
+
+    async def _trigger_textract_after_raw_upload(
+        self,
+        s3_key: str,
+        document_type: str,
+        user_id: str,
+        file_id: str,
+        original_filename: str
+    ) -> None:
+        """Gọi Textract và lưu kết quả vào Textract/{CV_extract|JD_extract}.
+        Đây là tác vụ async, không chặn response chính.
+        """
+        try:
+            from app.services.textract import textract_service
+            result = await textract_service.extract_text_from_s3(s3_key=s3_key, document_type=document_type)
+            if not result.get("success"):
+                logger.warning(f"Textract failed for {s3_key}: {result.get('error')}")
+                return
+            # Lưu text extract vào S3 thư mục Textract
+            text = result.get("text", "")
+            content_bytes = text.encode("utf-8")
+            extract_folder = "Textract/CV_extract" if document_type == "cv" else "Textract/JD_extract"
+            extract_key = f"{extract_folder}/{user_id}/{file_id}.txt"
+            s3_client = self.s3_service.s3_client
+            if s3_client:
+                s3_client.put_object(
+                    Bucket=self.s3_service.bucket_name,
+                    Key=extract_key,
+                    Body=content_bytes,
+                    ContentType="text/plain; charset=utf-8",
+                    Metadata={
+                        "user_id": user_id,
+                        "file_id": file_id,
+                        "source_key": s3_key,
+                        "document_type": document_type,
+                        "original_filename": original_filename
+                    }
+                )
+                logger.info(f"Saved Textract output to {extract_key}")
+        except Exception as e:
+            logger.warning(f"Failed to persist Textract output: {str(e)}")
     
     async def get_upload_status(self, file_id: str, user_id: str) -> Dict[str, Any]:
         """
@@ -363,6 +525,42 @@ class UploadService:
                 "error": str(e)
             }
     
+    async def get_user_jd_files(self, user_id: str) -> Dict[str, Any]:
+        """
+        Lấy danh sách JD files của user
+        
+        Args:
+            user_id: ID của user
+            
+        Returns:
+            Dict với files list
+        """
+        try:
+            # Use S3 service to list JD files
+            files_result = await self.s3_service.list_user_files(
+                user_id=user_id,
+                file_type="jd"
+            )
+            
+            if not files_result["success"]:
+                return {
+                    "success": False,
+                    "error": files_result["error"]
+                }
+            
+            return {
+                "success": True,
+                "files": files_result["files"],
+                "total_count": files_result["total_count"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Get user JD files error: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     async def get_user_cv_files(self, user_id: str) -> Dict[str, Any]:
         """
         Lấy danh sách CV files của user

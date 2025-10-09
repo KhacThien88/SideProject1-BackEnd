@@ -6,12 +6,15 @@ Comprehensive text extraction từ CV documents với async processing và error
 import boto3
 import asyncio
 import uuid
+import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, BinaryIO
 from botocore.exceptions import ClientError, WaiterError
 from botocore.config import Config
 
 from app.core.config import settings
+from app.core.database import get_dynamodb_resource
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,7 +61,8 @@ class TextractService:
     async def extract_text_from_s3(
         self, 
         s3_key: str, 
-        document_type: str = "cv"
+        document_type: str = "cv",
+        force: bool = False
     ) -> Dict[str, Any]:
         """
         Extract text từ document trong S3
@@ -72,26 +76,209 @@ class TextractService:
         """
         try:
             logger.info(f"Starting text extraction for {s3_key}")
-            
-            # Detect document type và choose appropriate method
-            file_extension = s3_key.lower().split('.')[-1]
-            
-            if file_extension == 'pdf':
-                # Use synchronous API for PDFs
-                result = await self._extract_text_sync(s3_key)
-            else:
-                # Use asynchronous API for other formats
-                result = await self._extract_text_async(s3_key)
-            
+
+            # Try reuse from S3 + DynamoDB if not forced
+            source_user_id: Optional[str] = None
+            source_file_id: Optional[str] = None
+            source_etag: Optional[str] = None
+            source_last_modified: Optional[str] = None
+
+            try:
+                head = self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
+                md = head.get('Metadata', {})
+                source_user_id = md.get('user_id')
+                source_file_id = md.get('file_id')
+                source_etag = head.get('ETag', '').strip('"')
+                lm = head.get('LastModified')
+                source_last_modified = lm.isoformat() if lm else None
+            except Exception:
+                # If we can't head the object, proceed with extraction attempt (will fail later accordingly)
+                pass
+
+            # Determine potential extract key path
+            extract_key: Optional[str] = None
+            if source_user_id and source_file_id:
+                extract_folder = "Textract/CV_extract" if document_type == "cv" else "Textract/JD_extract"
+                extract_key = f"{extract_folder}/{source_user_id}/{source_file_id}.txt"
+
+            if not force and extract_key:
+                # Optional DynamoDB validation with stored etag
+                etag_matches = True
+                try:
+                    dynamodb = get_dynamodb_resource()
+                    if dynamodb:
+                        table = dynamodb.Table(settings.cv_uploads_table_name)
+                        item_resp = table.get_item(Key={'file_id': source_file_id})
+                        item = item_resp.get('Item')
+                        if item and item.get('source_etag') and source_etag:
+                            etag_matches = (item.get('source_etag') == source_etag)
+                except Exception:
+                    # If dynamodb check fails, fallback to relying on S3 presence
+                    etag_matches = True
+
+                # If we consider cache valid, try to load cached extract from S3
+                if etag_matches:
+                    try:
+                        cached_obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=extract_key)
+                        cached_text_bytes = cached_obj['Body'].read()
+                        cached_text = cached_text_bytes.decode('utf-8', errors='ignore')
+                        processed_text = await self._process_extracted_text(cached_text, document_type)
+
+                        # Try to build structured JSON even from cache
+                        structured_json: Optional[Dict[str, Any]] = None
+                        processed_key: Optional[str] = None
+                        try:
+                            structured_json = await self._extract_structured_json(
+                                raw_text=cached_text,
+                                document_type=document_type
+                            )
+                        except Exception as e:
+                            logger.warning(f"Structured extraction (cache) failed: {str(e)}")
+
+                        # Persist structured JSON if available
+                        if structured_json and source_user_id and source_file_id:
+                            try:
+                                processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                                processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                                self.s3_client.put_object(
+                                    Bucket=self.bucket_name,
+                                    Key=processed_key,
+                                    Body=json.dumps(structured_json, ensure_ascii=False, indent=2).encode("utf-8"),
+                                    ContentType="application/json; charset=utf-8",
+                                    Metadata={
+                                        "user_id": source_user_id,
+                                        "file_id": source_file_id,
+                                        "source_key": s3_key,
+                                        "document_type": document_type
+                                    }
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to persist structured JSON (cache) to S3: {str(e)}")
+
+                            # Update DynamoDB mapping as well if possible
+                            try:
+                                dynamodb = get_dynamodb_resource()
+                                if dynamodb and source_file_id:
+                                    table = dynamodb.Table(settings.cv_uploads_table_name)
+                                    table.update_item(
+                                        Key={'file_id': source_file_id},
+                                        UpdateExpression="SET processed_json_key = :pjk, last_extracted_at = :ts",
+                                        ExpressionAttributeValues={
+                                            ':pjk': processed_key,
+                                            ':ts': datetime.utcnow().isoformat()
+                                        }
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Failed to update DynamoDB mapping (cache) for {source_file_id}: {str(e)}")
+
+                        return {
+                            "success": True,
+                            "text": processed_text["processed_text"],
+                            "raw_text": cached_text,
+                            "confidence": 0.0,
+                            "document_type": document_type,
+                            "extraction_method": "cache",
+                            "processing_metadata": processed_text["metadata"],
+                            "extraction_timestamp": datetime.utcnow().isoformat(),
+                            "structured_json": structured_json,
+                            "structured_json_s3_key": processed_key
+                        }
+                    except ClientError as e:
+                        if e.response['Error']['Code'] != 'NoSuchKey':
+                            logger.warning(f"Failed to reuse cached extract {extract_key}: {str(e)}")
+                        # else: no cache, proceed to extract
+
+            # Use asynchronous API for all document types
+            # Some PDF formats are not supported by sync API but work with async API
+            result = await self._extract_text_async(s3_key)
+
             if result["success"]:
                 # Process extracted text
                 processed_text = await self._process_extracted_text(
                     result["text"], 
                     document_type
                 )
-                
+
+                # Try extract structured JSON via Bedrock (non-fatal on failure)
+                structured_json: Optional[Dict[str, Any]] = None
+                try:
+                    structured_json = await self._extract_structured_json(
+                        raw_text=result["text"],
+                        document_type=document_type
+                    )
+                except Exception as e:
+                    logger.warning(f"Structured extraction failed: {str(e)}")
+
+                # Persist extract to S3 for future reuse if we have identifiers
+                if extract_key:
+                    try:
+                        content_bytes = processed_text["processed_text"].encode("utf-8")
+                        self.s3_client.put_object(
+                            Bucket=self.bucket_name,
+                            Key=extract_key,
+                            Body=content_bytes,
+                            ContentType="text/plain; charset=utf-8",
+                            Metadata={
+                                "user_id": source_user_id or "",
+                                "file_id": source_file_id or "",
+                                "source_key": s3_key,
+                                "document_type": document_type,
+                                "original_etag": source_etag or ""
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to persist Textract output to {extract_key}: {str(e)}")
+
+                # Persist structured JSON if available and identifiers present
+                processed_key: Optional[str] = None
+                if structured_json and source_user_id and source_file_id:
+                    try:
+                        processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                        processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                        self.s3_client.put_object(
+                            Bucket=self.bucket_name,
+                            Key=processed_key,
+                            Body=json.dumps(structured_json, ensure_ascii=False, indent=2).encode("utf-8"),
+                            ContentType="application/json; charset=utf-8",
+                            Metadata={
+                                "user_id": source_user_id,
+                                "file_id": source_file_id,
+                                "source_key": s3_key,
+                                "document_type": document_type
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to persist structured JSON to S3: {str(e)}")
+
+                # Update DynamoDB mapping for future reuse
+                try:
+                    dynamodb = get_dynamodb_resource()
+                    if dynamodb and source_file_id:
+                        table = dynamodb.Table(settings.cv_uploads_table_name)
+                        update_expr = "SET source_etag = :etag, source_last_modified = :lm, extract_key = :ek, last_extracted_at = :ts, document_type = :dt"
+                        expr_vals = {
+                            ':etag': source_etag or '',
+                            ':lm': source_last_modified or '',
+                            ':ek': extract_key or '',
+                            ':ts': datetime.utcnow().isoformat(),
+                            ':dt': document_type
+                        }
+                        # Also store processed_json_key if we created one
+                        if structured_json and source_user_id and source_file_id:
+                            processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                            processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                            update_expr += ", processed_json_key = :pjk"
+                            expr_vals[':pjk'] = processed_key
+                        table.update_item(
+                            Key={'file_id': source_file_id},
+                            UpdateExpression=update_expr,
+                            ExpressionAttributeValues=expr_vals
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to update DynamoDB mapping for {source_file_id}: {str(e)}")
+
                 logger.info(f"Text extraction completed for {s3_key}")
-                
+
                 return {
                     "success": True,
                     "text": processed_text["processed_text"],
@@ -100,11 +287,13 @@ class TextractService:
                     "document_type": document_type,
                     "extraction_method": result.get("method", "unknown"),
                     "processing_metadata": processed_text["metadata"],
-                    "extraction_timestamp": datetime.utcnow().isoformat()
+                    "extraction_timestamp": datetime.utcnow().isoformat(),
+                    "structured_json": structured_json,
+                    "structured_json_s3_key": processed_key
                 }
             else:
                 return result
-                
+
         except Exception as e:
             logger.error(f"Text extraction failed for {s3_key}: {str(e)}")
             return {
@@ -112,6 +301,55 @@ class TextractService:
                 "error": str(e),
                 "s3_key": s3_key
             }
+
+    async def _extract_structured_json(self, raw_text: str, document_type: str) -> Optional[Dict[str, Any]]:
+        """Extract structured JSON using Bedrock. Returns None on failure.
+        This is best-effort and should not block the main Textract flow.
+        """
+        model_arn = getattr(settings, 'bedrock_model_arn', None) or os.getenv("BEDROCK_MODEL_ARN")
+        if not model_arn:
+            return None
+        region = getattr(settings, 'aws_region', 'ap-southeast-2')
+
+        if document_type == 'cv':
+            prompt_template = (
+                "You are an expert at extracting structured information from resume text. "
+                "Do not fabricate. Return strict JSON with keys: full_name, email_address, phone_number, location, "
+                "summary, linkedin_profile, github_profile, portfolio_website, skills (array), work_experience "
+                "(array of objects: job_title, company, duration, description), education (array of objects: degree, "
+                "institution, graduation_year), certifications (array), languages (array), projects (array), references (array)."
+            )
+        else:
+            prompt_template = (
+                "Extract structured info from job description as strict JSON with keys: job_title, company_name, "
+                "location, job_type, salary_range, company_website, posting_date, contact_information, responsibilities (array), "
+                "requirements (array), benefits (array), application_instructions, required_certifications (array), preferred_languages (array)."
+            )
+        try:
+            client = boto3.client(
+                'bedrock-runtime',
+                region_name=region,
+                aws_access_key_id=getattr(settings, 'aws_access_key_id', None),
+                aws_secret_access_key=getattr(settings, 'aws_secret_access_key', None)
+            )
+            prompt = f"{prompt_template}\n{raw_text}"
+            response = client.converse(
+                modelId=model_arn,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 2000, "temperature": 0.1, "topP": 0.9}
+            )
+            response_text = response["output"]["message"]["content"][0]["text"].strip()
+            if response_text.startswith("```json"):
+                response_text = response_text.replace("```json", "").strip()
+            if response_text.endswith("```"):
+                response_text = response_text.rstrip("```").strip()
+            parsed = json.loads(response_text)
+            if isinstance(parsed, dict):
+                return parsed
+            return None
+        except Exception as e:
+            logger.warning(f"Bedrock structured extraction error: {str(e)}")
+            return None
     
     async def extract_text_from_bytes(
         self, 
@@ -210,11 +448,30 @@ class TextractService:
                     "error": "Access denied to S3 object"
                 }
             else:
-                logger.error(f"Textract sync error: {str(e)}")
-                return {
-                    "success": False,
-                    "error": f"Textract error: {str(e)}"
-                }
+                error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                error_message = str(e)
+                
+                if error_code == 'UnsupportedDocumentException':
+                    logger.error(f"Unsupported document format: {error_message}")
+                    return {
+                        "success": False,
+                        "error": "Document format not supported by Textract. Please ensure the file is a valid PDF or image.",
+                        "error_code": error_code
+                    }
+                elif error_code == 'InvalidS3ObjectException':
+                    logger.error(f"S3 object not accessible: {error_message}")
+                    return {
+                        "success": False,
+                        "error": "Cannot access file in S3. Check file permissions and region settings.",
+                        "error_code": error_code
+                    }
+                else:
+                    logger.error(f"Textract sync error: {error_message}")
+                    return {
+                        "success": False,
+                        "error": f"Textract processing failed: {error_message}",
+                        "error_code": error_code
+                    }
         except Exception as e:
             logger.error(f"Sync extraction error: {str(e)}")
             return {
@@ -238,9 +495,40 @@ class TextractService:
             job_id = response['JobId']
             logger.info(f"Started async text extraction job: {job_id}")
             
-            # Wait for job completion
-            waiter = self.textract_client.get_waiter('text_detection_job_complete')
-            waiter.wait(JobId=job_id)
+            # Wait for job completion using polling
+            import time
+            max_wait_time = 300  # 5 minutes
+            wait_interval = 5    # 5 seconds
+            elapsed_time = 0
+            
+            while elapsed_time < max_wait_time:
+                try:
+                    status_response = self.textract_client.get_document_text_detection(JobId=job_id)
+                    job_status = status_response.get('JobStatus', 'UNKNOWN')
+                    
+                    if job_status == 'SUCCEEDED':
+                        result_response = status_response
+                        break
+                    elif job_status == 'FAILED':
+                        error_message = status_response.get('StatusMessage', 'Job failed')
+                        raise Exception(f"Textract job failed: {error_message}")
+                    elif job_status in ['IN_PROGRESS', 'SUBMITTED']:
+                        logger.info(f"Job {job_id} status: {job_status}, waiting...")
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    else:
+                        raise Exception(f"Unknown job status: {job_status}")
+                        
+                except ClientError as e:
+                    if e.response.get('Error', {}).get('Code') == 'InvalidJobIdException':
+                        # Job not ready yet, continue waiting
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    else:
+                        raise
+            
+            if elapsed_time >= max_wait_time:
+                raise Exception("Textract job timed out")
             
             # Get results
             result_response = self.textract_client.get_document_text_detection(JobId=job_id)

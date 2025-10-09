@@ -43,11 +43,13 @@ class Settings(BaseSettings):
     from_email: str = "noreply@example.com"
     
     # AWS (Dùng cho S3/DynamoDB). Hệ thống email hiện dùng SMTP Gmail, không dùng SES
-    aws_region: str = "us-east-1"
+    aws_region: str = "ap-southeast-2"
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     # ses_from_email: str = "noreply@example.com"  # Deprecated: email chuyển sang SMTP, không dùng SES
     frontend_url: str = "http://localhost:3000"
+    # Bedrock
+    bedrock_model_arn: Optional[str] = None
     
     # File Upload
     max_file_size: int = 10485760  # 10MB
@@ -55,8 +57,8 @@ class Settings(BaseSettings):
     allowed_file_types: str = "pdf,doc,docx,txt"
     
     # S3 Configuration
-    s3_bucket_name: str = "ai-resume-analyzer-cv-uploads"
-    s3_region: str = "us-east-1"
+    s3_bucket_name: str = "my-cv-storage-bucket"
+    s3_region: str = "ap-southeast-2"
     s3_access_key_id: Optional[str] = None
     s3_secret_access_key: Optional[str] = None
     s3_endpoint_url: Optional[str] = None

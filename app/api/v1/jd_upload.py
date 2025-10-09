@@ -1,6 +1,6 @@
 """
-CV Upload API Endpoints
-Handle CV file uploads with validation and security
+JD Upload API Endpoints
+Handle JD (Job Description) file uploads with validation and security
 """
 
 import logging
@@ -18,14 +18,14 @@ from app.utils.validators import validate_file_type, validate_file_size
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter(tags=["File Upload"])
+router = APIRouter(tags=["JD Upload"])
 
 # Upload service instance
 upload_service = UploadService()
 
 
-class UploadResponse(BaseModel):
-    """Response model cho upload operations"""
+class JDUploadResponse(BaseModel):
+    """Response model cho JD upload operations"""
     success: bool
     message: str
     file_id: Optional[str] = None
@@ -35,14 +35,32 @@ class UploadResponse(BaseModel):
     upload_timestamp: Optional[str] = None
 
 
-class UploadStatusResponse(BaseModel):
-    """Response model cho upload status"""
+class JDUploadStatusResponse(BaseModel):
+    """Response model cho JD upload status"""
     file_id: str
     status: str  # pending, processing, completed, failed
     progress: Optional[int] = None
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class JDFileInfo(BaseModel):
+    """Model cho thông tin JD file"""
+    file_id: str
+    filename: str
+    file_size: int
+    file_type: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class JDListResponse(BaseModel):
+    """Response model cho list JD files"""
+    success: bool
+    files: List[JDFileInfo]
+    total_count: int
 
 
 async def get_current_user(request: Request):
@@ -66,7 +84,7 @@ async def get_current_user(request: Request):
                 detail="Invalid token payload"
             )
         
-        return {"user_id": user_id, "email": payload.get("email"), "role": payload.get("role", "candidate")}
+        return {"user_id": user_id, "email": payload.get("email"), "role": payload.get("role", "recruiter")}
     
     except Exception as e:
         logger.error(f"Authentication error: {str(e)}")
@@ -76,23 +94,23 @@ async def get_current_user(request: Request):
         )
 
 
-@router.post("/cv", response_model=UploadResponse,
-            summary="Upload CV",
-            description="Upload CV file (PDF, JPG, JPEG, PNG). Automatically validates file type and size.")
-async def upload_cv(
+@router.post("/jd", response_model=JDUploadResponse,
+            summary="Upload JD",
+            description="Upload Job Description file (PDF, JPG, JPEG, PNG). Automatically validates file type and size.")
+async def upload_jd(
     request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Upload CV file with validation and security
+    Upload JD file with validation and security
     
-    - **file**: CV file (PDF, JPG, JPEG, PNG) - max 10MB
+    - **file**: JD file (PDF, JPG, JPEG, PNG) - max 10MB
     - **Authentication**: Required (JWT token)
     - **Rate limiting**: Applied
     """
     try:
-        logger.info(f"CV upload attempt by user {current_user['user_id']}")
+        logger.info(f"JD upload attempt by user {current_user['user_id']}")
         
         # Validate file
         validation_result = await upload_service.validate_upload_file(file)
@@ -114,25 +132,25 @@ async def upload_cv(
                 detail="Too many upload requests. Please wait before trying again."
             )
         
-        # Process upload
-        upload_result = await upload_service.process_cv_upload(
+        # Process JD upload using dedicated method
+        upload_result = await upload_service.process_jd_upload(
             file=file,
             user_id=current_user["user_id"],
             user_email=current_user.get("email")
         )
         
         if not upload_result["success"]:
-            logger.error(f"Upload processing failed: {upload_result['error']}")
+            logger.error(f"JD upload processing failed: {upload_result['error']}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Upload processing failed"
+                detail="JD upload processing failed"
             )
         
-        logger.info(f"CV uploaded successfully: {upload_result['file_id']}")
+        logger.info(f"JD uploaded successfully: {upload_result['file_id']}")
         
-        return UploadResponse(
+        return JDUploadResponse(
             success=True,
-            message="CV uploaded successfully",
+            message="JD uploaded successfully",
             file_id=upload_result["file_id"],
             file_url=upload_result.get("file_url"),
             file_size=upload_result.get("file_size"),
@@ -143,28 +161,28 @@ async def upload_cv(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in upload_cv: {str(e)}")
+        logger.error(f"Unexpected error in upload_jd: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during upload"
+            detail="Internal server error during JD upload"
         )
 
 
-@router.get("/cv/{file_id}/status", response_model=UploadStatusResponse,
-           summary="Check Upload Status",
-           description="Get the current status of the uploaded file (pending, processing, completed, failed).")
-async def get_upload_status(
+@router.get("/jd/{file_id}/status", response_model=JDUploadStatusResponse,
+           summary="Check JD Upload Status",
+           description="Get the current status of the uploaded JD file (pending, processing, completed, failed).")
+async def get_jd_upload_status(
     file_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get the upload status of CV file
+    Get the upload status of JD file
     
     - **file_id**: ID of the uploaded file
     - **Authentication**: Required
     """
     try:
-        logger.info(f"Status check for file {file_id} by user {current_user['user_id']}")
+        logger.info(f"JD status check for file {file_id} by user {current_user['user_id']}")
         
         status_result = await upload_service.get_upload_status(
             file_id=file_id,
@@ -177,7 +195,7 @@ async def get_upload_status(
                 detail=status_result["error"]
             )
         
-        return UploadStatusResponse(
+        return JDUploadStatusResponse(
             file_id=status_result["file_id"],
             status=status_result["status"],
             progress=status_result.get("progress"),
@@ -189,26 +207,26 @@ async def get_upload_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in get_upload_status: {str(e)}")
+        logger.error(f"Unexpected error in get_jd_upload_status: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
 
 
-@router.delete("/cv/{file_id}")
-async def delete_cv(
+@router.delete("/jd/{file_id}")
+async def delete_jd(
     file_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Delete uploaded CV file
+    Delete uploaded JD file
     
     - **file_id**: ID of the file to delete
     - **Authentication**: Required
     """
     try:
-        logger.info(f"Delete request for file {file_id} by user {current_user['user_id']}")
+        logger.info(f"JD delete request for file {file_id} by user {current_user['user_id']}")
         
         delete_result = await upload_service.delete_cv_file(
             file_id=file_id,
@@ -225,7 +243,7 @@ async def delete_cv(
             status_code=status.HTTP_200_OK,
             content={
                 "success": True,
-                "message": "CV file deleted successfully",
+                "message": "JD file deleted successfully",
                 "file_id": file_id
             }
         )
@@ -233,20 +251,22 @@ async def delete_cv(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in delete_cv: {str(e)}")
+        logger.error(f"Unexpected error in delete_jd: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
 
 
-@router.get("/cv/user/{user_id}")
-async def get_user_cv_files(
+@router.get("/jd/user/{user_id}", response_model=JDListResponse,
+           summary="Get User JD Files",
+           description="Get list of JD files for a specific user. Only the owner or admin can access.")
+async def get_user_jd_files(
     user_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get list of CV files for user
+    Get list of JD files for user
     
     - **user_id**: ID of the user (must match current user)
     - **Authentication**: Required
@@ -260,9 +280,10 @@ async def get_user_cv_files(
                 detail="Access denied"
             )
         
-        logger.info(f"List CV files for user {user_id}")
+        logger.info(f"List JD files for user {user_id}")
         
-        files_result = await upload_service.get_user_cv_files(user_id)
+        # Use upload service to list JD files
+        files_result = await upload_service.get_user_jd_files(user_id)
         
         if not files_result["success"]:
             raise HTTPException(
@@ -282,9 +303,8 @@ async def get_user_cv_files(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in get_user_cv_files: {str(e)}")
+        logger.error(f"Unexpected error in get_user_jd_files: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
-
