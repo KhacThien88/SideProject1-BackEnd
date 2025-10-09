@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     aws_secret_access_key: Optional[str] = None
     # ses_from_email: str = "noreply@example.com"  # Deprecated: email chuyển sang SMTP, không dùng SES
     frontend_url: str = "http://localhost:3000"
+    # Bedrock
+    bedrock_model_arn: Optional[str] = None
     
     # File Upload
     max_file_size: int = 10485760  # 10MB

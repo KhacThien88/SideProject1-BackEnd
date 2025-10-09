@@ -9,7 +9,8 @@ import warnings
 warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
-from s3_utils import download_from_s3, upload_to_s3, file_exists_in_s3
+from .s3_utils import download_from_s3, upload_to_s3, file_exists_in_s3
+from app.core.config import settings
 from PIL import Image
 import cv2
 import time
@@ -43,7 +44,7 @@ def measure_pipeline_time(func):
     return wrapper
 
 class OCRProcessor:
-    def __init__(self, region_name='ap-southeast-2'):
+    def __init__(self, region_name: str):
         self.client = boto3.client('textract', region_name=region_name)
 
     def process(self, path):
@@ -100,7 +101,7 @@ class OCRProcessor:
         return ocr_text.strip()
 
 class BedrockExtractor:
-    def __init__(self, model_arn, region_name='ap-southeast-2'):
+    def __init__(self, model_arn: str, region_name: str):
         if not model_arn:
             raise ValueError("Model ARN is required")
         self.model_arn = model_arn
@@ -140,13 +141,13 @@ class S3Handler:
 def main():
     load_dotenv()
     
-    bucket_name = os.getenv("S3_BUCKET_NAME")
-    input_s3_prefix = os.getenv("INPUT_S3_PREFIX")
-    output_s3_prefix = os.getenv("OUTPUT_S3_PREFIX")
-    local_input_path = os.getenv("LOCAL_INPUT_DATA_DIR")
-    local_output_path = os.getenv("LOCAL_OUTPUT_DATA_DIR")
-    model_arn = os.getenv("BEDROCK_MODEL_ARN")
-    region_name = os.getenv("S3_REGION")
+    bucket_name = os.getenv("S3_BUCKET_NAME") or getattr(settings, 's3_bucket_name', None)
+    input_s3_prefix = os.getenv("INPUT_S3_PREFIX") or ""
+    output_s3_prefix = os.getenv("OUTPUT_S3_PREFIX") or ""
+    local_input_path = os.getenv("LOCAL_INPUT_DATA_DIR") or os.path.join(os.getcwd(), "data/input")
+    local_output_path = os.getenv("LOCAL_OUTPUT_DATA_DIR") or os.path.join(os.getcwd(), "data/output")
+    model_arn = getattr(settings, 'bedrock_model_arn', None) or os.getenv("BEDROCK_MODEL_ARN") or ""
+    region_name = os.getenv("S3_REGION") or getattr(settings, 'aws_region', 'ap-southeast-2')
     
     print(f"Using model ARN: {model_arn}")
     print(f"Using S3 bucket: {bucket_name} in region: {region_name}")
@@ -159,8 +160,8 @@ def main():
     os.makedirs(local_output_path, exist_ok=True)
 
     # Khởi tạo OCR
-    ocr_processor = OCRProcessor()
-    bedrock_extractor = BedrockExtractor(model_arn, region_name)
+    ocr_processor = OCRProcessor(region_name=region_name)
+    bedrock_extractor = BedrockExtractor(model_arn=model_arn, region_name=region_name)
     s3_handler = S3Handler(bucket_name)
     
     # Prompt templates
@@ -257,7 +258,10 @@ def main():
     Here is the job description text:
     """
     
-    file_name = "2aa9c768-7e13-432c-a33f-8476964e7965_CV_Huan_Developer.pdf"
+    # Lấy file_name từ env để tránh gán cứng cấu hình
+    file_name = os.getenv("AI_INPUT_FILE_NAME")
+    if not file_name:
+        raise ValueError("AI_INPUT_FILE_NAME is required in environment for info_extractor main()")
     file_base_name = os.path.splitext(file_name)[0]
 
     input_key = f"{input_s3_prefix.rstrip('/')}/{file_name}"

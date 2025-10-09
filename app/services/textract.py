@@ -6,6 +6,8 @@ Comprehensive text extraction từ CV documents với async processing và error
 import boto3
 import asyncio
 import uuid
+import os
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, BinaryIO
 from botocore.exceptions import ClientError, WaiterError
@@ -121,6 +123,54 @@ class TextractService:
                         cached_text_bytes = cached_obj['Body'].read()
                         cached_text = cached_text_bytes.decode('utf-8', errors='ignore')
                         processed_text = await self._process_extracted_text(cached_text, document_type)
+
+                        # Try to build structured JSON even from cache
+                        structured_json: Optional[Dict[str, Any]] = None
+                        processed_key: Optional[str] = None
+                        try:
+                            structured_json = await self._extract_structured_json(
+                                raw_text=cached_text,
+                                document_type=document_type
+                            )
+                        except Exception as e:
+                            logger.warning(f"Structured extraction (cache) failed: {str(e)}")
+
+                        # Persist structured JSON if available
+                        if structured_json and source_user_id and source_file_id:
+                            try:
+                                processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                                processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                                self.s3_client.put_object(
+                                    Bucket=self.bucket_name,
+                                    Key=processed_key,
+                                    Body=json.dumps(structured_json, ensure_ascii=False, indent=2).encode("utf-8"),
+                                    ContentType="application/json; charset=utf-8",
+                                    Metadata={
+                                        "user_id": source_user_id,
+                                        "file_id": source_file_id,
+                                        "source_key": s3_key,
+                                        "document_type": document_type
+                                    }
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to persist structured JSON (cache) to S3: {str(e)}")
+
+                            # Update DynamoDB mapping as well if possible
+                            try:
+                                dynamodb = get_dynamodb_resource()
+                                if dynamodb and source_file_id:
+                                    table = dynamodb.Table(settings.cv_uploads_table_name)
+                                    table.update_item(
+                                        Key={'file_id': source_file_id},
+                                        UpdateExpression="SET processed_json_key = :pjk, last_extracted_at = :ts",
+                                        ExpressionAttributeValues={
+                                            ':pjk': processed_key,
+                                            ':ts': datetime.utcnow().isoformat()
+                                        }
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Failed to update DynamoDB mapping (cache) for {source_file_id}: {str(e)}")
+
                         return {
                             "success": True,
                             "text": processed_text["processed_text"],
@@ -129,7 +179,9 @@ class TextractService:
                             "document_type": document_type,
                             "extraction_method": "cache",
                             "processing_metadata": processed_text["metadata"],
-                            "extraction_timestamp": datetime.utcnow().isoformat()
+                            "extraction_timestamp": datetime.utcnow().isoformat(),
+                            "structured_json": structured_json,
+                            "structured_json_s3_key": processed_key
                         }
                     except ClientError as e:
                         if e.response['Error']['Code'] != 'NoSuchKey':
@@ -146,6 +198,16 @@ class TextractService:
                     result["text"], 
                     document_type
                 )
+
+                # Try extract structured JSON via Bedrock (non-fatal on failure)
+                structured_json: Optional[Dict[str, Any]] = None
+                try:
+                    structured_json = await self._extract_structured_json(
+                        raw_text=result["text"],
+                        document_type=document_type
+                    )
+                except Exception as e:
+                    logger.warning(f"Structured extraction failed: {str(e)}")
 
                 # Persist extract to S3 for future reuse if we have identifiers
                 if extract_key:
@@ -167,22 +229,50 @@ class TextractService:
                     except Exception as e:
                         logger.warning(f"Failed to persist Textract output to {extract_key}: {str(e)}")
 
+                # Persist structured JSON if available and identifiers present
+                processed_key: Optional[str] = None
+                if structured_json and source_user_id and source_file_id:
+                    try:
+                        processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                        processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                        self.s3_client.put_object(
+                            Bucket=self.bucket_name,
+                            Key=processed_key,
+                            Body=json.dumps(structured_json, ensure_ascii=False, indent=2).encode("utf-8"),
+                            ContentType="application/json; charset=utf-8",
+                            Metadata={
+                                "user_id": source_user_id,
+                                "file_id": source_file_id,
+                                "source_key": s3_key,
+                                "document_type": document_type
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to persist structured JSON to S3: {str(e)}")
+
                 # Update DynamoDB mapping for future reuse
                 try:
                     dynamodb = get_dynamodb_resource()
                     if dynamodb and source_file_id:
                         table = dynamodb.Table(settings.cv_uploads_table_name)
                         update_expr = "SET source_etag = :etag, source_last_modified = :lm, extract_key = :ek, last_extracted_at = :ts, document_type = :dt"
+                        expr_vals = {
+                            ':etag': source_etag or '',
+                            ':lm': source_last_modified or '',
+                            ':ek': extract_key or '',
+                            ':ts': datetime.utcnow().isoformat(),
+                            ':dt': document_type
+                        }
+                        # Also store processed_json_key if we created one
+                        if structured_json and source_user_id and source_file_id:
+                            processed_folder = "Processed/CV_Json" if document_type == "cv" else "Processed/JD_Json"
+                            processed_key = f"{processed_folder}/{source_user_id}/{source_file_id}.json"
+                            update_expr += ", processed_json_key = :pjk"
+                            expr_vals[':pjk'] = processed_key
                         table.update_item(
                             Key={'file_id': source_file_id},
                             UpdateExpression=update_expr,
-                            ExpressionAttributeValues={
-                                ':etag': source_etag or '',
-                                ':lm': source_last_modified or '',
-                                ':ek': extract_key or '',
-                                ':ts': datetime.utcnow().isoformat(),
-                                ':dt': document_type
-                            }
+                            ExpressionAttributeValues=expr_vals
                         )
                 except Exception as e:
                     logger.warning(f"Failed to update DynamoDB mapping for {source_file_id}: {str(e)}")
@@ -197,7 +287,9 @@ class TextractService:
                     "document_type": document_type,
                     "extraction_method": result.get("method", "unknown"),
                     "processing_metadata": processed_text["metadata"],
-                    "extraction_timestamp": datetime.utcnow().isoformat()
+                    "extraction_timestamp": datetime.utcnow().isoformat(),
+                    "structured_json": structured_json,
+                    "structured_json_s3_key": processed_key
                 }
             else:
                 return result
@@ -209,6 +301,55 @@ class TextractService:
                 "error": str(e),
                 "s3_key": s3_key
             }
+
+    async def _extract_structured_json(self, raw_text: str, document_type: str) -> Optional[Dict[str, Any]]:
+        """Extract structured JSON using Bedrock. Returns None on failure.
+        This is best-effort and should not block the main Textract flow.
+        """
+        model_arn = getattr(settings, 'bedrock_model_arn', None) or os.getenv("BEDROCK_MODEL_ARN")
+        if not model_arn:
+            return None
+        region = getattr(settings, 'aws_region', 'ap-southeast-2')
+
+        if document_type == 'cv':
+            prompt_template = (
+                "You are an expert at extracting structured information from resume text. "
+                "Do not fabricate. Return strict JSON with keys: full_name, email_address, phone_number, location, "
+                "summary, linkedin_profile, github_profile, portfolio_website, skills (array), work_experience "
+                "(array of objects: job_title, company, duration, description), education (array of objects: degree, "
+                "institution, graduation_year), certifications (array), languages (array), projects (array), references (array)."
+            )
+        else:
+            prompt_template = (
+                "Extract structured info from job description as strict JSON with keys: job_title, company_name, "
+                "location, job_type, salary_range, company_website, posting_date, contact_information, responsibilities (array), "
+                "requirements (array), benefits (array), application_instructions, required_certifications (array), preferred_languages (array)."
+            )
+        try:
+            client = boto3.client(
+                'bedrock-runtime',
+                region_name=region,
+                aws_access_key_id=getattr(settings, 'aws_access_key_id', None),
+                aws_secret_access_key=getattr(settings, 'aws_secret_access_key', None)
+            )
+            prompt = f"{prompt_template}\n{raw_text}"
+            response = client.converse(
+                modelId=model_arn,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 2000, "temperature": 0.1, "topP": 0.9}
+            )
+            response_text = response["output"]["message"]["content"][0]["text"].strip()
+            if response_text.startswith("```json"):
+                response_text = response_text.replace("```json", "").strip()
+            if response_text.endswith("```"):
+                response_text = response_text.rstrip("```").strip()
+            parsed = json.loads(response_text)
+            if isinstance(parsed, dict):
+                return parsed
+            return None
+        except Exception as e:
+            logger.warning(f"Bedrock structured extraction error: {str(e)}")
+            return None
     
     async def extract_text_from_bytes(
         self, 
