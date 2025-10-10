@@ -48,6 +48,8 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_login: Optional[datetime]
+    google_id: Optional[str]
+    auth_provider: str
 
     class Config:
         from_attributes = True
@@ -77,3 +79,16 @@ class OTPVerificationRequest(BaseModel):
 
 class ResendOTPRequest(BaseModel):
     email: EmailStr
+
+
+class GoogleAuthRequest(BaseModel):
+    google_token: str
+
+
+class GoogleAuthResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+    is_new_user: bool

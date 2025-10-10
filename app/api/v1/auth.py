@@ -7,10 +7,11 @@ import logging
 from app.schemas.user import (
     UserRegisterRequest, UserLoginRequest, UserResponse, 
     TokenResponse, RefreshTokenRequest, UserUpdateRequest,
-    OTPVerificationRequest, ResendOTPRequest
+    OTPVerificationRequest, ResendOTPRequest, GoogleAuthRequest, GoogleAuthResponse
 )
 from app.services.auth_service import AuthService
 from app.services.email import email_service
+from app.services.google_auth import google_auth_service
 from app.core.security import verify_token
 from app.core.config import settings
 from app.models.user import User
@@ -194,7 +195,9 @@ async def get_current_user_info(request: Request, current_user: User = Depends(g
             email_verified=current_user.email_verified,
             created_at=current_user.created_at,
             updated_at=current_user.updated_at,
-            last_login=current_user.last_login
+            last_login=current_user.last_login,
+            google_id=current_user.google_id,
+            auth_provider=current_user.auth_provider
         )
     
     except Exception as e:
@@ -248,7 +251,9 @@ async def update_current_user(
             status=updated_user.status,
             email_verified=updated_user.email_verified,
             created_at=updated_user.created_at,
-            last_login=updated_user.last_login
+            last_login=updated_user.last_login,
+            google_id=updated_user.google_id,
+            auth_provider=updated_user.auth_provider
         )
     
     except HTTPException:
@@ -421,4 +426,104 @@ async def reset_password(request: Request, token: str, new_password: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during password reset"
+        )
+
+
+@router.post("/google-auth", response_model=GoogleAuthResponse,
+            summary="Google OAuth Authentication",
+            description="Authenticate user with Google OAuth token. This endpoint accepts Google ID token from frontend and returns JWT tokens for API access.")
+async def google_auth(request: Request, google_data: GoogleAuthRequest):
+    """
+    Authenticate user with Google OAuth
+    
+    This endpoint allows users to authenticate using their Google account.
+    The frontend should send the Google ID token obtained from Google Sign-In.
+    
+    **Process:**
+    1. Verify Google ID token
+    2. Check if user exists by Google ID or email
+    3. Create new user if not exists, or authenticate existing user
+    4. Return JWT access and refresh tokens
+    
+    **Request Body:**
+    - **google_token**: Google ID token from frontend (required)
+    
+    **Response:**
+    - **access_token**: JWT access token for API authentication
+    - **refresh_token**: JWT refresh token for token renewal
+    - **user**: User information including Google OAuth details
+    - **is_new_user**: Boolean indicating if this is a new user registration
+    
+    **Example Request:**
+    ```json
+    {
+        "google_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+    
+    **Example Response:**
+    ```json
+    {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "token_type": "bearer",
+        "expires_in": 1800,
+        "user": {
+            "user_id": "123e4567-e89b-12d3-a456-426614174000",
+            "email": "user@gmail.com",
+            "full_name": "John Doe",
+            "auth_provider": "google",
+            "google_id": "1234567890"
+        },
+        "is_new_user": false
+    }
+    ```
+    """
+    try:
+        logger.info("Google authentication attempt")
+        
+        # Authenticate or create user with Google token
+        user, is_new_user, message = await google_auth_service.authenticate_or_create_user(google_data.google_token)
+        
+        if not user:
+            logger.warning(f"Google authentication failed: {message}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=message
+            )
+        
+        # Create user session
+        token_response = await auth_service.create_user_session(user)
+        
+        logger.info(f"Google authentication successful: {user.email} (new_user: {is_new_user})")
+        
+        return GoogleAuthResponse(
+            access_token=token_response.access_token,
+            refresh_token=token_response.refresh_token,
+            token_type=token_response.token_type,
+            expires_in=token_response.expires_in,
+            user=UserResponse(
+                user_id=user.user_id,
+                email=user.email,
+                full_name=user.full_name,
+                phone=user.phone,
+                role=user.role,
+                status=user.status,
+                email_verified=user.email_verified,
+                created_at=user.created_at,
+                updated_at=user.updated_at,
+                last_login=user.last_login,
+                google_id=user.google_id,
+                auth_provider=user.auth_provider
+            ),
+            is_new_user=is_new_user
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in google_auth: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during Google authentication"
         )

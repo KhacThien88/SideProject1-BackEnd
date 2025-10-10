@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     password_require_numbers: bool = True
     password_require_special_chars: bool = True
     
+    # Google OAuth
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    google_redirect_uri: Optional[str] = None
+    
     # Rate Limiting
     rate_limit_requests: int = 100
     rate_limit_window: int = 60  # seconds

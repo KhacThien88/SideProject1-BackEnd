@@ -25,7 +25,9 @@ class UserRepository:
                 email_verified=user.email_verified,
                 created_at=user.created_at,
                 updated_at=user.updated_at,
-                last_login=user.last_login
+                last_login=user.last_login,
+                google_id=user.google_id,
+                auth_provider=user.auth_provider
             )
             item.save()
             return True
@@ -83,6 +85,17 @@ class UserRepository:
         """Check if email already exists"""
         user = self.get_user_by_email(email)
         return user is not None
+
+    def get_user_by_google_id(self, google_id: str) -> Optional[User]:
+        """Get user by Google ID"""
+        try:
+            # Scan table for google_id (in production, add GSI for google_id)
+            for item in UserTable.scan(UserTable.google_id == google_id):
+                return self._table_to_user(item)
+            return None
+        except Exception as e:
+            print(f"Error getting user by Google ID: {e}")
+            return None
 
     def create_session(self, session: UserSession) -> bool:
         """Create user session"""
@@ -157,7 +170,9 @@ class UserRepository:
             email_verified=bool(item.email_verified),
             created_at=item.created_at,
             updated_at=item.updated_at,
-            last_login=item.last_login
+            last_login=item.last_login,
+            google_id=item.google_id if hasattr(item, 'google_id') else None,
+            auth_provider=item.auth_provider if hasattr(item, 'auth_provider') else "local"
         )
 
     def _table_to_session(self, item: UserSessionTable) -> UserSession:

@@ -39,7 +39,8 @@ class AuthService:
                 full_name=user_data.full_name,
                 phone=user_data.phone,
                 role=user_data.role,
-                status=UserStatus.PENDING_VERIFICATION
+                status=UserStatus.PENDING_VERIFICATION,
+                auth_provider="local"
             )
 
             if not self.user_repo.create_user(user):
@@ -81,6 +82,9 @@ class AuthService:
                 else:
                     return None, "Account is not active"
 
+            if user.auth_provider != "local":
+                return None, f"Please use {user.auth_provider} login"
+            
             if not verify_password(login_data.password, user.password_hash):
                 return None, "Invalid email or password"
 
@@ -148,7 +152,9 @@ class AuthService:
                     email_verified=user.email_verified,
                     created_at=user.created_at,
                     updated_at=user.updated_at,
-                    last_login=user.last_login
+                    last_login=user.last_login,
+                    google_id=user.google_id,
+                    auth_provider=user.auth_provider
                 )
             )
 
@@ -239,7 +245,9 @@ class AuthService:
                     email_verified=user.email_verified,
                     created_at=user.created_at,
                     updated_at=user.updated_at,
-                    last_login=user.last_login
+                    last_login=user.last_login,
+                    google_id=user.google_id,
+                    auth_provider=user.auth_provider
                 )
             )
 

@@ -27,7 +27,7 @@ class UserStatus(str, Enum):
 class User(BaseModel):
     user_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: EmailStr
-    password_hash: str
+    password_hash: Optional[str] = None
     full_name: str
     phone: Optional[str] = None
     role: UserRole
@@ -36,6 +36,8 @@ class User(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     last_login: Optional[datetime] = None
+    google_id: Optional[str] = None
+    auth_provider: str = "local"  # "local" or "google"
     
     class Config:
         use_enum_values = True
@@ -81,7 +83,7 @@ class UserTable(Model):
 
     user_id = UnicodeAttribute(hash_key=True)
     email = UnicodeAttribute()
-    password_hash = UnicodeAttribute()
+    password_hash = UnicodeAttribute(null=True)
     full_name = UnicodeAttribute()
     phone = UnicodeAttribute(null=True)
     role = UnicodeAttribute()
@@ -90,6 +92,8 @@ class UserTable(Model):
     created_at = UTCDateTimeAttribute()
     updated_at = UTCDateTimeAttribute()
     last_login = UTCDateTimeAttribute(null=True)
+    google_id = UnicodeAttribute(null=True)
+    auth_provider = UnicodeAttribute(default="local")
     email_index = EmailIndex()
 
 
