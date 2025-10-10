@@ -33,13 +33,19 @@ class AuthService:
             if self.user_repo.email_exists(user_data.email):
                 return False, "Email already registered"
 
+            # Restrict roles for self-registration: only candidate and recruiter
+            # Admins must be provisioned out-of-band
+            if str(user_data.role) not in (str(UserRole.CANDIDATE), str(UserRole.RECRUITER)):
+                return False, "Registration allowed only for candidate or recruiter roles"
+
             user = User(
                 email=user_data.email,
                 password_hash=get_password_hash(user_data.password),
                 full_name=user_data.full_name,
                 phone=user_data.phone,
                 role=user_data.role,
-                status=UserStatus.PENDING_VERIFICATION
+                status=UserStatus.PENDING_VERIFICATION,
+                auth_provider="local"
             )
 
             if not self.user_repo.create_user(user):
@@ -81,6 +87,9 @@ class AuthService:
                 else:
                     return None, "Account is not active"
 
+            if user.auth_provider != "local":
+                return None, f"Please use {user.auth_provider} login"
+            
             if not verify_password(login_data.password, user.password_hash):
                 return None, "Invalid email or password"
 
@@ -148,7 +157,9 @@ class AuthService:
                     email_verified=user.email_verified,
                     created_at=user.created_at,
                     updated_at=user.updated_at,
-                    last_login=user.last_login
+                    last_login=user.last_login,
+                    google_id=user.google_id,
+                    auth_provider=user.auth_provider
                 )
             )
 
@@ -239,7 +250,9 @@ class AuthService:
                     email_verified=user.email_verified,
                     created_at=user.created_at,
                     updated_at=user.updated_at,
-                    last_login=user.last_login
+                    last_login=user.last_login,
+                    google_id=user.google_id,
+                    auth_provider=user.auth_provider
                 )
             )
 
