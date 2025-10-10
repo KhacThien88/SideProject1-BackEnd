@@ -33,6 +33,11 @@ class AuthService:
             if self.user_repo.email_exists(user_data.email):
                 return False, "Email already registered"
 
+            # Restrict roles for self-registration: only candidate and recruiter
+            # Admins must be provisioned out-of-band
+            if str(user_data.role) not in (str(UserRole.CANDIDATE), str(UserRole.RECRUITER)):
+                return False, "Registration allowed only for candidate or recruiter roles"
+
             user = User(
                 email=user_data.email,
                 password_hash=get_password_hash(user_data.password),
