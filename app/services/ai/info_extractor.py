@@ -4,7 +4,6 @@ import json
 import re
 import numpy as np
 from pdf2image import convert_from_path
-import easyocr
 import warnings
 warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
 from dotenv import load_dotenv
@@ -148,13 +147,6 @@ def main():
     model_arn = os.getenv("BEDROCK_MODEL_ARN")
     region_name = os.getenv("S3_REGION")
     
-    print(f"Using model ARN: {model_arn}")
-    print(f"Using S3 bucket: {bucket_name} in region: {region_name}")
-    print(f"Input S3 prefix: {input_s3_prefix}")
-    print(f"Output S3 prefix: {output_s3_prefix}")
-    print(f"Local input path: {local_input_path}")
-    print(f"Local output path: {local_output_path}")
-        
     os.makedirs(local_input_path, exist_ok=True)
     os.makedirs(local_output_path, exist_ok=True)
 
@@ -168,24 +160,26 @@ def main():
     You are an expert at extracting structured information from unstructured text.
     Do not make up any information.
     Extract the following information from the resume text below:
-    1. Full Name
-    2. Email Address
-    3. Phone Number
-    4. Location
-    5. Skills (list of skills)
-    6. Work Experience (list of job titles and companies)
-    7. Education (list of degrees and institutions)
-    8. Certifications (list of certifications)ßß
-    9. Languages (list of languages spoken)
-    10. Projects (list of notable projects with full detailed descriptions, duration and technologys used)
-    11. Summary (a brief summary of the candidate)
-    12. LinkedIn Profile (URL of the LinkedIn profile)
-    13. GitHub Profile (URL of the GitHub profile)
-    14. Portfolio Website (URL of the portfolio website)
-    15. References (list of references if available)
+    1. Role
+    2. Full Name
+    3. Email Address
+    4. Phone Number
+    5. Location
+    6. Skills (list of skills)
+    7. Work Experience (list of job titles and companies)
+    8. Education (list of degrees and institutions)
+    9. Certifications (list of certifications)
+    10. Languages (list of languages spoken)
+    11. Projects (list of notable projects with full detailed descriptions, duration and technologys used)
+    12. Summary (a brief summary of the candidate)
+    13. LinkedIn Profile (URL of the LinkedIn profile)
+    14. GitHub Profile (URL of the GitHub profile)
+    15. Portfolio Website (URL of the portfolio website)
+    16. References (list of references if available)
     Format the output as a JSON object with the above fields. If any information is not available, use "Not Available" as the value.
     The JSON format must adhere to the following structure:
     {{
+    "role": "string",
     "full_name": "string",
     "email_address": "string",
     "phone_number": "string",
